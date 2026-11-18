@@ -201,8 +201,9 @@ def test_asset_variants(tmp_path, screen):
     )
     cv2.imwrite(str(tmp_path / "toolbar" / "saveas.png"), crop(bgr, lay["icon0"]))
     st = AssetStore([tmp_path], "windows")
-    names = [t.path.split(str(tmp_path))[1] for t in st.resolve("toolbar/save")]
-    assert names[0].startswith("/windows/")  # most specific first
+    from pathlib import Path
+    names = [Path(t.path).relative_to(tmp_path).parts for t in st.resolve("toolbar/save")]
+    assert names[0][0] == "windows"  # most specific first (path parts: any OS separator)
     assert len(names) == 4  # saveas.png is not a variant
     assert {t.scale for t in st.resolve("toolbar/save")} == {1.0, 2.0}
     with pytest.raises(BadAsset):
