@@ -291,10 +291,16 @@ class WindowBackend(Backend):
 
     # ================================================================== windows of the app
     def _app_windows(self) -> list[dict]:
-        wins = [w for w in list_windows(self.api) if w["pid"] == self.pid and w["rect"].w > 1
+        wins = [w for w in list_windows(self.api)
+                if (self._private_desktop or w["pid"] == self.pid) and w["rect"].w > 1
                 and w["rect"].h > 1]
         if not wins:
             raise SightlineError("the application has no visible window any more (closed?)")
+        if self._private_desktop and not self.api.u.IsWindow(self.hwnd):
+            # the window we bound to is gone (a "Connecting..." dialog, a splash screen):
+            # every window here is the app's - follow its biggest one
+            big = max(wins, key=lambda w: w["rect"].w * w["rect"].h)
+            self.hwnd, self.pid = big["hwnd"], big["pid"]
         main = [w for w in wins if w["hwnd"] == self.hwnd]
         if main and main[0]["minimized"]:
             if not self.restore_minimized:
@@ -879,6 +885,11 @@ def shell_command(launch):
         return launch, 0                      # "prog.exe arg" or a name found on PATH
     if not ext or ext in DIRECT:
         return launch, 0
+    if ext == ".ica":                                    # Citrix: the client engine itself
+        from ..citrix import find_wfica
+        exe = find_wfica()
+        if exe:
+            return [exe, *parts], 0
     if ext in (".bat", ".cmd"):                          # in a console nobody sees
         return ["cmd.exe", "/d", "/c", *parts], 0x08000000
     if ext == ".ps1":
