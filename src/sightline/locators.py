@@ -218,6 +218,12 @@ class Text(Locator):
         words = s.ocr_words(ctx.frame, area)
         thr = self.similarity if self.similarity is not None else s.text_similarity
         hits = search_text(words, self.query, self.exact, thr, self.accents, self.case)
+        if not isinstance(self.query, re.Pattern):
+            # second look - always for truncated-looking candidates ('MD-0001' for 'CMD-0001'):
+            # a genuine hit elsewhere (a status bar) must not hide the misread real target
+            hits = hits + self._reread_near_misses(ctx, words, area, thr,
+                                                   only_truncated=bool(hits),
+                                                   skip=[h.rect for h in hits])
         if not hits and not isinstance(self.query, re.Pattern):
             q = fold(self.query, self.accents, self.case)
             near = sorted(((similarity(fold(p.text, self.accents, self.case), q), p)
@@ -229,6 +235,59 @@ class Text(Locator):
                 ctx.diag.append(f"{self.describe()}: OCR read no text in {area}")
         return [Match(h.rect.offset(area.x, area.y), h.score, self.describe(), h.text)
                 for h in hits]
+
+    def _reread_near_misses(self, ctx: FindContext, words, area: Rect, thr: float,
+                            only_truncated: bool = False, skip=()):
+        """Second look: whole-screen OCR loses characters next to borders and block corners
+        ('MD-0001' for 'CMD-0001' at the corner of a selected row), while a tight crop of the
+        same text reads right. The closest candidates are re-read from a crop with margin
+        (a char's width each side, to recover a dropped first/last letter); a hit still has
+        to match genuinely (exact stays exact)."""
+        from .vision.ocr import TextHit, phrase_similarity
+        q = fold(self.query, self.accents, self.case)
+        n = max(len(q.split()), 1)
+        cands = []
+        for ph in group_phrases(words):
+            for size in sorted({max(1, n - 1), n, n + 1}):
+                for i in range(max(len(ph.words) - size + 1, 0)):
+                    sub = ph.words[i:i + size]
+                    text = " ".join(w.text for w in sub)
+                    ft = fold(text, self.accents, self.case)
+                    if only_truncated and len(ft.replace(" ", "")) >= len(q.replace(" ", "")):
+                        continue
+                    sc = similarity(ft, q)
+                    if sc >= 0.6:
+                        r = sub[0].rect
+                        for w in sub[1:]:
+                            r = r.union(w.rect)
+                        cands.append((sc, r))
+        cands.sort(key=lambda t: -t[0])
+        hits, seen = [], list(skip)
+        for _sc, r in cands[:3]:
+            if any(r.iou(o) > 0.5 for o in seen):
+                continue
+            seen.append(r)
+            pad = max(r.h, 6)
+            box = Rect(r.x - pad, r.y - 3, r.w + 2 * pad, r.h + 6).offset(area.x, area.y)
+            box = box.intersect(area)
+            if box is None:
+                continue
+            text, _ = ctx.session.ocr.line(ctx.frame.crop(box).pixels)
+            t = fold(text, self.accents, self.case)
+            if self.exact:
+                ok = re.search(r"(^|\s)" + re.escape(q) + r"(\s|$)", t) is not None
+                score = 1.0
+            else:
+                toks = t.split()
+                best = max((phrase_similarity(" ".join(toks[i:i + k]), q)
+                            for k in {max(1, n - 1), n, n + 1} for i in range(max(len(toks) - k + 1, 0))),
+                           default=0.0)
+                ok, score = best >= thr, best
+            if ok:
+                ctx.diag.append(f"{self.describe()}: found on a second look at {box} (screen OCR "
+                                f"had read a near miss)")
+                hits.append(TextHit(r, text, score))
+        return hits
 
 
 class At(Locator):

@@ -37,16 +37,13 @@ def windows_session_locked() -> bool:
         return False
     import ctypes
     from ctypes import wintypes
-    u = ctypes.windll.user32
-    u.OpenInputDesktop.restype = wintypes.HANDLE
+    u, _ = _win32()
     h = u.OpenInputDesktop(0, False, 0x0001)              # DESKTOP_READOBJECTS
     if not h:
         return True                                       # access denied: Winlogon desktop
     try:
         buf = ctypes.create_unicode_buffer(256)
         n = wintypes.DWORD()
-        u.GetUserObjectInformationW.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
-                                                wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
         if u.GetUserObjectInformationW(h, 2, buf, ctypes.sizeof(buf), ctypes.byref(n)):  # UOI_NAME
             return buf.value.lower() != "default"
         return False
@@ -207,53 +204,72 @@ class LocalBackend(Backend):
         self._mss.close()
 
 
-def _win_clipboard_get() -> str:                               # pragma: no cover - Windows
+def _win32():                                                 # pragma: no cover - Windows
+    """Private user32/kernel32 handles with FULL prototypes. Without argtypes ctypes passes
+    handles as 32-bit ints: on 64-bit Windows that fails ('int too long to convert') or
+    truncates a handle - intermittently, depending on the handle's value."""
     import ctypes
     from ctypes import wintypes
-    u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
-    u32.GetClipboardData.restype = wintypes.HANDLE
-    k32.GlobalLock.restype = ctypes.c_void_p
-    k32.GlobalLock.argtypes = [wintypes.HGLOBAL]
-    for _ in range(20):                    # another process may hold the clipboard briefly
-        if u32.OpenClipboard(None):
-            break
+    u = ctypes.WinDLL("user32", use_last_error=True)
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    H, B, U = wintypes.HANDLE, wintypes.BOOL, wintypes.UINT
+    for f, res, args in [
+        (u.OpenClipboard, B, [wintypes.HWND]), (u.CloseClipboard, B, []),
+        (u.EmptyClipboard, B, []), (u.GetClipboardData, H, [U]),
+        (u.SetClipboardData, H, [U, H]),
+        (k.GlobalAlloc, H, [U, ctypes.c_size_t]), (k.GlobalFree, H, [H]),
+        (k.GlobalLock, ctypes.c_void_p, [H]), (k.GlobalUnlock, B, [H]),
+        (u.OpenInputDesktop, H, [wintypes.DWORD, B, wintypes.DWORD]),
+        (u.CloseDesktop, B, [H]),
+        (u.GetUserObjectInformationW, B, [H, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+                                          ctypes.POINTER(wintypes.DWORD)]),
+    ]:
+        f.restype, f.argtypes = res, args
+    return u, k
+
+
+def _open_clipboard(u) -> None:                                 # pragma: no cover - Windows
+    for _ in range(40):                    # another process may hold the clipboard briefly
+        if u.OpenClipboard(None):
+            return
         time.sleep(0.05)
-    else:
-        raise SightlineError("Clipboard is locked by another application")
+    raise SightlineError("Clipboard is locked by another application")
+
+
+def _win_clipboard_get() -> str:                               # pragma: no cover - Windows
+    import ctypes
+    u, k = _win32()
+    _open_clipboard(u)
     try:
-        h = u32.GetClipboardData(13)       # CF_UNICODETEXT
+        h = u.GetClipboardData(13)         # CF_UNICODETEXT
         if not h:
             return ""
-        p = k32.GlobalLock(h)
+        p = k.GlobalLock(h)
+        if not p:
+            return ""
         try:
             return ctypes.wstring_at(p)
         finally:
-            k32.GlobalUnlock(h)
+            k.GlobalUnlock(h)
     finally:
-        u32.CloseClipboard()
+        u.CloseClipboard()
 
 
 def _win_clipboard_set(text: str) -> None:                     # pragma: no cover - Windows
     import ctypes
-    from ctypes import wintypes
-    u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
-    k32.GlobalAlloc.restype = wintypes.HGLOBAL
-    k32.GlobalLock.restype = ctypes.c_void_p
-    k32.GlobalLock.argtypes = [wintypes.HGLOBAL]
-    u32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    u, k = _win32()
     data = (text + "\0").encode("utf-16-le")
-    for _ in range(20):
-        if u32.OpenClipboard(None):
-            break
-        time.sleep(0.05)
-    else:
-        raise SightlineError("Clipboard is locked by another application")
+    _open_clipboard(u)
     try:
-        u32.EmptyClipboard()
-        h = k32.GlobalAlloc(0x0002, len(data))                # GMEM_MOVEABLE
-        p = k32.GlobalLock(h)
+        u.EmptyClipboard()
+        h = k.GlobalAlloc(0x0002, len(data))                    # GMEM_MOVEABLE
+        if not h:
+            raise SightlineError(f"GlobalAlloc failed ({ctypes.get_last_error()})")
+        p = k.GlobalLock(h)
         ctypes.memmove(p, data, len(data))
-        k32.GlobalUnlock(h)
-        u32.SetClipboardData(13, h)
+        k.GlobalUnlock(h)
+        if not u.SetClipboardData(13, h):                       # the system now owns h
+            k.GlobalFree(h)
+            raise SightlineError(f"SetClipboardData failed ({ctypes.get_last_error()})")
     finally:
-        u32.CloseClipboard()
+        u.CloseClipboard()

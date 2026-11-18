@@ -84,6 +84,10 @@ class Session:
         return self.backend.capture(region)
 
     def close(self) -> None:
+        """Release the target (idempotent: safe to call twice)."""
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
         try:
             self.backend.close()
         finally:
@@ -379,6 +383,7 @@ class Session:
         else:
             p, _, _ = self._point(at, (0, 0), None, "scroll")
         self.backend.scroll(p.x, p.y, clicks, horizontal)
+        self._park()
         self.tracer.step("scroll", f"{clicks:+d} at {_desc(at) if at is not None else 'center'}", None)
 
     def scroll_until_visible(self, target, at=None, clicks: int = 3, max_scrolls: int = 40,
@@ -393,6 +398,14 @@ class Session:
         if at is not None:
             am, _ = self.locate(at, action="scroll-area")
             area = am.rect
+            # only a target INSIDE the scrolled area counts: the search is RESTRICTED to the
+            # scrolled rows (all columns) when scrolling vertically, to the scrolled columns
+            # horizontally. The same text elsewhere (a status bar "Commande CMD-0001
+            # sélectionnée") is then never even a candidate.
+            screen = self.capture().rect
+            band = (Rect(area.x, screen.y, area.w, screen.h) if horizontal
+                    else Rect(screen.x, area.y, screen.w, area.h))
+            loc = loc.within(band)
         sign = 1 if direction in ("down", "right") else -1
         for s in ([sign, -sign] if both_ways else [sign]):
             for _ in range(max_scrolls):
@@ -401,12 +414,20 @@ class Session:
                     return self.locate(loc, timeout=2, action="scroll-to")[0]
                 before = self.capture()
                 p = area.center if area else Point(before.width // 2, before.height // 2)
+                # "did it move?" is judged on the whole BAND being scrolled (all columns of
+                # those rows), not just the `at` rect: a narrow strip can look identical
+                # before and after (e.g. solid selection colour) and end the scroll too early
+                watch = before.rect
+                if area is not None:
+                    watch = (Rect(before.origin_x, area.y, before.width, area.h) if not horizontal
+                             else Rect(area.x, before.origin_y, area.w, before.height))
                 self.backend.scroll(p.x, p.y, s * clicks, horizontal)
+                self._park()     # the pointer must not cover what we read next
                 try:
-                    after = self.wait_until_stable(area, quiet=0.25, timeout=5)
+                    after = self.wait_until_stable(watch, quiet=0.25, timeout=5)
                 except Unstable:
                     after = self.capture()
-                if not region_changed(before, after, area or before.rect):
+                if not region_changed(before, after, watch):
                     break                                  # end of this direction
         return self.locate(loc, timeout=0, action="scroll_until_visible")[0]
 

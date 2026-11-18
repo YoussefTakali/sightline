@@ -79,14 +79,22 @@ def changed_bbox(a: Frame, b: Frame, pixel_threshold: int = 24, min_area: int = 
     mask = (cv2.absdiff(canvas[0], canvas[1]) > pixel_threshold).astype(np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
     n, _, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
-    boxes = [stats[i] for i in range(1, n) if stats[i][4] >= min_area]
+    boxes = [Rect(int(st[0]), int(st[1]), int(st[2]), int(st[3]))
+             for st in (stats[i] for i in range(1, n)) if st[4] >= min_area]
     if not boxes:
         return None
-    x0 = min(s[0] for s in boxes)
-    y0 = min(s[1] for s in boxes)
-    x1 = max(s[0] + s[2] for s in boxes)
-    y1 = max(s[1] + s[3] for s in boxes)
-    return Rect.from_corners(x0 + common.x, y0 + common.y, x1 + common.x, y1 + common.y)
+    # the popup = the LARGEST changed block + whatever touches it; small unrelated changes
+    # elsewhere (a cursor, a blinking caret, a status text) must not stretch it
+    boxes.sort(key=lambda r: -r.area)
+    region = boxes[0]
+    grown = True
+    while grown:
+        grown = False
+        for r in boxes[1:]:
+            if r.intersect(region.expand(6)) is not None and region.union(r) != region:
+                region = region.union(r)
+                grown = True
+    return region.offset(common.x, common.y)
 
 
 def region_changed(a: Frame, b: Frame, r: Rect, pixel_threshold: int = 24,

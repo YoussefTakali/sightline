@@ -69,3 +69,16 @@ backend = "display"
 [profiles.local-linux.connection]
 command = ["/opt/app/bin/app"]
 size = [1280, 800]
+
+# The Citrix-like lab (tools/citrix_lab.sh up): portal + published app in a headless browser
+[profiles.citrix-lab]
+backend = "browser"
+park_mouse = [1275, 795]
+[profiles.citrix-lab.connection]
+url = "http://127.0.0.1:18080/guacamole/"
+url_env = "SIGHTLINE_LAB_URL"
+executable_path = ""                       # "" = Playwright's browser; or channel = "msedge"
+executable_path_env = "SIGHTLINE_BROWSER"
+viewport = [1280, 800]
+clipboard = "navigator"
+target_os = "linux"

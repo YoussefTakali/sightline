@@ -46,7 +46,7 @@ def menu(s: Session, path: str, timeout: float | None = None, separator: str = "
         _, popup = _open_and_get_popup(s, target, timeout)
         nxt = Text(items[i + 1])
         if popup is not None:
-            nxt_in = nxt.within(popup.expand(4))
+            nxt_in = nxt.within(popup.expand(12))
             if s.exists(nxt_in, timeout=2) is not None:
                 target = nxt_in
                 continue
@@ -59,7 +59,8 @@ def select(s: Session, combo, option: str, timeout: float | None = None,
     (scrolling the list if needed), click it."""
     _, popup = _open_and_get_popup(s, as_locator(combo), timeout)
     opt = Text(option)
-    where = opt.within(popup.expand(2)) if popup is not None else opt
+    # a margin around the list: OCR misses text that touches the crop's edge (last item)
+    where = opt.within(popup.expand(12)) if popup is not None else opt
     if s.exists(where, timeout=1) is None and popup is not None:
         try:
             s.scroll_until_visible(where, at=popup, max_scrolls=max_scrolls)

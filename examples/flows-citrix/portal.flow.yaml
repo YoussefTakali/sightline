@@ -1,0 +1,39 @@
+# Through a Citrix-like web portal (tools/citrix_lab.sh up), headless:
+#   sightline run examples/flows-citrix --config examples/sightline.toml --profile citrix-lab
+# With a real Citrix StoreFront the portal steps are the same idea: its login page, then a
+# click on the app's tile; everything after that is your application.
+name: Orders through the portal
+vars: {user: jean}
+recover:
+  - press: esc
+tests:
+  portal login opens the published app:
+    - wait: text:Login
+      timeout: 30
+    - click: text:Password
+      offset: [0, -46]                  # the username field, right above "Password"
+    - type: ${user}
+    - click: text:Password
+    - type: ${env:LAB_PASSWORD}
+      secret: true
+    - click: text:Login
+      expect: text:Gestion des commandes     # the app's window title, logged in or not
+      expect_timeout: 90
+  log in if needed and read the grid:
+    - if_visible: text:Connexion             # a reconnected session may already be logged in
+      timeout: 3
+      then:
+        - type: Jean
+          into: "text:Utilisateur : @right:200"
+        - type: ${env:DEMO_PASSWORD}
+          into: "text:Mot de passe : @right:200"
+          secret: true
+        - click: text:Valider
+          expect: text:Bienvenue
+    - scroll_until_visible: exact:CMD-0001
+      area: "text:Numéro @below:300"
+      direction: up
+    - read_table: exact:CMD-0001[1]
+      columns: [Numéro, Client, Montant, Statut]
+      must_contain: [CMD-0001]
+      csv: results/orders.csv

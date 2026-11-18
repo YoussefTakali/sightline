@@ -116,6 +116,8 @@ def main_screen(user):
             v = tree.item(sel[0], "values")
             dialog("Détail", f"Commande {v[0]} - {v[1]} - {v[2]} EUR", ["Fermer"])
 
+    # like real grids (JTable, DataGridView): a click gives the grid the keyboard focus
+    tree.bind("<ButtonPress-1>", lambda _e: tree.focus_set(), add="+")
     tree.bind("<Control-a>", select_all)
     tree.bind("<Control-c>", copy)
     tree.bind("<<TreeviewSelect>>", on_select)

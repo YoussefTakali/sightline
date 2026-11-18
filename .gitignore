@@ -9,3 +9,4 @@ sightline-results/
 sightline-traces/
 .venv/
 .wine-env/
+examples/flows-citrix/results/

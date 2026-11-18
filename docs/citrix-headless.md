@@ -29,6 +29,27 @@ Chromium (`tests/test_e2e_browser.py`: login, scrolling a grid, reading the full
 the REMOTE clipboard with accents, dialogs). The same pattern applies to VMware Horizon
 HTML Access, Azure Virtual Desktop / Windows 365 web client, Guacamole.
 
+## Try it without Citrix: the lab
+
+`tools/citrix_lab.sh up` starts a Citrix-like environment with containers (Apache
+Guacamole): a **web portal with a login**, a **published app** that opens inside the
+browser (canvas + websocket, like Citrix Workspace for HTML5), a **gateway**, and an **RDP
+desktop** running a demo business app. `tests/test_e2e_citrix_lab.py` drives it headless
+by pixels only: portal login, the app's own login, scrolling a grid, opening a row, the
+whole grid through the remote clipboard, the grid by OCR through the gateway's compressed
+picture (60 rows, verified against the clipboard copy), a menu path, a drop-down, dialogs
+in varying order, and a YAML flow through `sightline run` (`examples/flows-citrix`).
+
+What the lab taught (and sightline now handles):
+
+| Found in the lab | Handled by |
+|---|---|
+| Only the FIRST copy reached the browser: the gateway pushes the browser clipboard to the session on a window *focus* event; an app that copies again while it already owns the clipboard never notifies | the `navigator` clipboard adapter signals focus after writing its marker - every copy arrives (0.5 s), identical ones included |
+| The web client draws the mouse pointer INTO the picture: after a wheel scroll it covered a grid row | the pointer is parked after every scroll (`park_mouse`) |
+| Whole-screen OCR dropped the first letter next to a border / selection corner ("MD-0001") | second look: near misses that look truncated are re-read from a tight crop; exact stays exact |
+| The same text in a status bar ("Commande CMD-0001 sélectionnée") stopped a scroll | `scroll_until_visible(at=...)` only searches inside the scrolled rows |
+| Reconnecting a second browser to the same session: both kept taking it (= Citrix roaming) | one client per session - close the first (the tests do) |
+
 ## Step 1 - check that your company allows the HTML5 client (2 minutes)
 
 1. Open your Citrix portal (the StoreFront / Workspace URL) in Edge.

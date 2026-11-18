@@ -183,7 +183,19 @@ def _read_page(s: Session, frame: Frame, geo: GridGeometry, key_idx: int):
                 if a <= cy < b:
                     cells[r][c] = (cells[r][c] + " " + w.text).strip()
                     break
-    return [[" ".join(v.split()) for v in row] for row in cells]
+    return [[_clean_cell(v) for v in row] for row in cells]
+
+
+def _clean_cell(value: str) -> str:
+    """Drop tokens made only of symbols at the START or END of a cell ('——— 87,01',
+    '124,02 _'): fragments of borders/separators OCR picks up through a compressed remote
+    picture. Symbols inside a value ('12-03', 'A/B', '-15,00') are data and are kept."""
+    toks = value.split()
+    while toks and not any(c.isalnum() for c in toks[0]):
+        toks.pop(0)
+    while toks and not any(c.isalnum() for c in toks[-1]):
+        toks.pop()
+    return " ".join(toks)
 
 
 def _same_key(a: str, b: str) -> bool:
@@ -221,6 +233,7 @@ def read_grid(s: Session, columns: Sequence[str], key_column: int | str = 0,
             break
         before = frame
         s.backend.scroll(geo.body.center.x, geo.body.center.y, scroll_clicks)
+        s._park()          # web clients draw the pointer INTO the picture: move it off the rows
         try:
             frame = s.wait_until_stable(geo.body, quiet=0.3, timeout=5)
         except SightlineError:

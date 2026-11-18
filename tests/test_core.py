@@ -228,3 +228,12 @@ def test_fuzzy_text_is_word_aware():
     ]
     assert search_text(words, "Commande CMD-0042 - Lefèvre") == []
     assert search_text(words, "Commande CMD-0042 - Martin")
+
+
+def test_grid_cell_cleanup_keeps_data_symbols():
+    from sightline.components.grid import _clean_cell
+    assert _clean_cell("——— 87,01") == "87,01"
+    assert _clean_cell("124,02 _") == "124,02"
+    assert _clean_cell("| CMD-0001 |") == "CMD-0001"
+    assert _clean_cell("-15,00") == "-15,00"
+    assert _clean_cell("A / B") == "A / B"

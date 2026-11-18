@@ -8,6 +8,7 @@ import time
 from ctypes import wintypes
 
 from sightline import At, Image, Rect, Session
+from sightline.backends.local import windows_session_locked
 from sightline.backends.window_win import WindowBackend, list_windows
 from sightline.vision.match import Template
 
@@ -57,6 +58,17 @@ check("modifier combo (Ctrl+A) via thread key state", text_of(edit) == "remplac�
 s.type("\nligne 2")
 time.sleep(0.3)
 check("Enter key", text_of(edit) == "remplacé\r\nligne 2", ascii(text_of(edit)))
+
+b.set_clipboard("user's own clipboard é€")
+check("clipboard round trip (accents, euro)", b.get_clipboard() == "user's own clipboard é€",
+      ascii(b.get_clipboard()))
+s.press("ctrl+a")
+copied = s.copy("ctrl+c", timeout=5)
+check("Ctrl+C copy read back through the session", copied.replace("\r", "") == "remplacé\nligne 2",
+      ascii(copied))
+check("user's clipboard restored after the copy", b.get_clipboard() == "user's own clipboard é€",
+      ascii(b.get_clipboard()))
+check("session not reported as locked", windows_session_locked() is False)
 
 menubar = Rect(f.origin_x + 4, er.y - 22, 40, 20)
 s.click(Image(Template.from_array(f.crop(menubar).pixels, "file_menu")))

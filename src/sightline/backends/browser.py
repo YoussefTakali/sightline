@@ -43,9 +43,15 @@ PW_KEYS = {
 
 # How each web client exposes the REMOTE clipboard to the page.
 CLIPBOARD_JS = {
-    # async clipboard API of the page (Citrix HTML5, AVD web client...; permission granted)
+    # async clipboard API of the page (Citrix HTML5, AVD web client, Guacamole...; permission
+    # granted). After writing, a window 'focus' event: web clients push the local clipboard
+    # to the remote session on focus (what a user switching back to the tab triggers). Without
+    # it the remote clipboard keeps its old owner, and an app that copies again while it
+    # already owns the clipboard (Tk, other X11 apps) never notifies the gateway: only the
+    # first copy would arrive - measured with Guacamole over both VNC and RDP.
     "navigator": ("() => navigator.clipboard.readText()",
-                  "t => navigator.clipboard.writeText(t)"),
+                  "t => navigator.clipboard.writeText(t)"
+                  ".then(() => window.dispatchEvent(new Event('focus')))"),
     # noVNC: its clipboard panel mirrors the remote clipboard
     "novnc": ("() => document.getElementById('noVNC_clipboard_text').value",
               """t => { const e = document.getElementById('noVNC_clipboard_text');

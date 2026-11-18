@@ -1,0 +1,17 @@
+<!-- Citrix-like lab: one user, one "published app" = an RDP desktop running the demo app
+     (RDP is closer to Citrix ICA/HDX than VNC, and has a proper clipboard channel). -->
+<user-mapping>
+    <authorize username="jean" password="secret">
+        <connection name="Gestion des commandes">
+            <protocol>rdp</protocol>
+            <param name="hostname">lab-desktop</param>
+            <param name="port">3389</param>
+            <param name="username">jean</param>
+            <param name="password">labpass</param>
+            <param name="security">any</param>
+            <param name="ignore-cert">true</param>
+            <param name="color-depth">24</param>
+            <param name="resize-method">display-update</param>
+        </connection>
+    </authorize>
+</user-mapping>

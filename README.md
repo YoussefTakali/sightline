@@ -138,7 +138,7 @@ look of a button is one more file, never a script change. Create them with
 | `display` | **local app on Linux, private invisible display** (TigerVNC Xvnc) | [headless-local](docs/headless-local.md) |
 | `local` | foreground, this machine (Windows, macOS, Linux X11) | |
 | `vnc` | any machine with a VNC server: containers, Windows VMs (TightVNC/UltraVNC), Macs | [windows-headless](docs/windows-headless.md) |
-| `browser` | Citrix / Horizon / AVD **web clients** in a headless browser | [citrix-headless](docs/citrix-headless.md) |
+| `browser` | Citrix / Horizon / AVD **web clients** in a headless browser (try it on the lab: `tools/citrix_lab.sh up`) | [citrix-headless](docs/citrix-headless.md) |
 | `oculix` | the OculiX/SikuliX jar drives the screen; vision stays here | |
 | `replay` | recorded screenshots: test locators and readers offline | |
 
@@ -172,6 +172,7 @@ Robot Framework users: `Library  sightline.rf.SightlineLibrary  profile=...` (se
 | `tests/test_runner.py`, `test_inspector.py` | runner, flows, recovery, results page, `init`; inspector API + page | offline |
 | `tests/test_e2e_headless.py` | a real app over VNC: login, checkbox state, scrolling, dialogs, clipboard grid, **OCR grid vs clipboard**, a YAML flow via `sightline run` | podman/docker |
 | `tests/test_e2e_browser.py` | the same app through a web client in headless Chromium | podman/docker |
+| `tests/test_e2e_citrix_lab.py` | **Citrix-like lab** (`tools/citrix_lab.sh`): portal login → published app in the browser over RDP → app, grid by clipboard and by OCR, menus, dialogs, a YAML flow | podman/docker |
 | `tests/test_display_linux.py` | private displays (Xvnc and Xvfb+x11vnc), parallel, crash reporting | `docker/dev` |
 | `tools/wine_smoke.sh` | the Windows `window` backend under Wine | podman/docker |
 | `tests/windows/test_window_real.py` | background capture **behind another window** on real Windows | CI `windows-latest` |
