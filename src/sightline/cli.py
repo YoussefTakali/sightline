@@ -6,6 +6,7 @@
   sightline crop  shot.png x y w h assets/toolbar/save.png   cut an asset from a capture
   sightline vnc-check host[:port]      [--password-env VAR]  diagnose a VNC target
   sightline browser-login URL --user-data-dir DIR [--channel msedge]   one-time SSO/MFA login
+  sightline desktop open|show|close NAME [--portal URL]   visit a hidden desktop, open apps there
   sightline init [dir] --title "My App"              create a project (profiles, flow, test)
   sightline inspect [--profile P | --image shot.png] live view, locator tester, asset cropper
   sightline run [paths] --profile P [-k expr] [--junit out.xml]   run tests + YAML flows
@@ -142,6 +143,17 @@ def cmd_browser_login(args):
         print("Log in in the browser window (MFA included). Close the window when done.")
         ctx.wait_for_event("close", timeout=0)
     print(f"profile saved in {args.user_data_dir}")
+
+
+def cmd_desktop(args):
+    from . import desktops
+    if args.action == "open":
+        desktops.open_desktop(args.name, args.portal or "", switch=not args.no_switch,
+                              max_minutes=args.max_minutes)
+    elif args.action == "show":
+        desktops.show(args.name, args.max_minutes)
+    else:
+        print(f"closed: {desktops.close_desktop(args.name)}")
 
 
 def cmd_inspect(args):
@@ -361,6 +373,13 @@ def main(argv=None):
     sp.add_argument("--channel", help="msedge | chrome (an installed browser, no download)")
     sp.add_argument("--executable")
     sp.set_defaults(fn=cmd_browser_login)
+    sp = sub.add_parser("desktop", help="visit a hidden desktop: open apps on it by hand")
+    sp.add_argument("action", choices=["open", "show", "close"])
+    sp.add_argument("name")
+    sp.add_argument("--portal", help="URL the panel's browser opens (e.g. the Citrix portal)")
+    sp.add_argument("--no-switch", action="store_true", help="create it without showing it")
+    sp.add_argument("--max-minutes", type=float, default=15, help="safety: back after N minutes")
+    sp.set_defaults(fn=cmd_desktop)
     sp = sub.add_parser("windows")
     sp.set_defaults(fn=cmd_windows)
     sp = sub.add_parser("doctor")
