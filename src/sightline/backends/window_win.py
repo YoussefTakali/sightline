@@ -90,6 +90,7 @@ class _Api:
             (u, "MonitorFromWindow"): (H, [HW, wintypes.DWORD]),
             (u, "GetMonitorInfoW"): (wintypes.BOOL, [H, P]),
             (u, "IsZoomed"): (wintypes.BOOL, [HW]),
+            (u, "GetAncestor"): (HW, [HW, wintypes.UINT]),
             (u, "SetWindowPos"): (wintypes.BOOL, [HW, HW, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                                   ctypes.c_int, wintypes.UINT]),
             (u, "GetWindowTextLengthW"): (ctypes.c_int, [HW]),
@@ -190,13 +191,25 @@ class WindowBackend(Backend):
     def __init__(self, title: str | None = None, launch: str | list[str] | None = None,
                  cwd: str | None = None, timeout: float = 30.0, regex: bool = False,
                  modifier_hold: float = 0.15, target_os: str = "windows",
-                 restore_minimized: bool = False, reminimize: bool = True):
+                 restore_minimized: bool = False, reminimize: bool = True,
+                 input_mode: str = "post", idle_ms: int = 800):
         """restore_minimized=True: if the app is minimized, restore it BEHIND all other windows
         without giving it focus (a minimized window draws nothing - with Citrix seamless the
         server even stops sending it - so it must be restored to be seen; you keep working).
         reminimize=True: when the session closes, minimize it again (without activating it)
         if sightline was the one that restored it - your taskbar looks as before the run."""
         super().__init__(target_os)
+        if input_mode not in ("post", "send", "real"):
+            raise SightlineError("input_mode must be 'post', 'send' or 'real'")
+        # post: queued window messages (never interrupts; some apps ignore them)
+        # send: synchronous messages + the activation messages real input generates
+        # real: polite REAL input - waits for the user to be idle, brings the app forward for
+        #       a fraction of a second, clicks/types, gives the user back window and cursor
+        self.input_mode = input_mode
+        self._real = None
+        if input_mode == "real":
+            from ._wininput import RealInput
+            self._real = RealInput(idle_ms=idle_ms)
         self.restore_minimized = restore_minimized
         self.reminimize = reminimize
         self._restored_by_us = False
@@ -399,9 +412,22 @@ class WindowBackend(Backend):
         return v
 
     def _post(self, hwnd, msg, wp, lp) -> None:
+        if self.input_mode == "send":
+            res = ctypes.c_size_t()
+            if not self.api.u.SendMessageTimeoutW(hwnd, msg, wp, lp, 0x2, 2000, ctypes.byref(res)):
+                raise SightlineError(f"the application did not process message 0x{msg:x} "
+                                     f"(error {ctypes.get_last_error()})")
+            return
         if not self.api.u.PostMessageW(hwnd, msg, wp, lp):
             raise SightlineError(f"could not post message 0x{msg:x} to the application "
                                  f"(error {ctypes.get_last_error()})")
+
+    def _top_at(self, x: int, y: int):
+        """The app's top-level window under screen (x, y) (a dialog or the main window)."""
+        for w in self._app_windows():
+            if w["rect"].contains(Point(x, y)):
+                return w["hwnd"]
+        return self.hwnd
 
     def _sync(self, hwnd) -> None:
         """Let the app process what was posted before the next step (best effort)."""
@@ -437,6 +463,11 @@ class WindowBackend(Backend):
         if nc != HTCLIENT:                       # menu bar, scrollbar, caption...
             self._post(h, NC_MSG[button][0], nc & 0xFFFF, _lp(*self._pos))
             return
+        if self.input_mode == "send":
+            # what Windows sends before a real click reaches a window
+            msg = BTN_MSG[button][0]
+            self._post(h, 0x0021, self._top_at(*self._pos), (msg << 16) | HTCLIENT)  # MOUSEACTIVATE
+            self._post(h, 0x0020, h, (msg << 16) | HTCLIENT)                       # SETCURSOR
         self._post(h, BTN_MSG[button][0], self._wparam_buttons(), _lp(cx, cy))
 
     def mouse_up(self, button: str = "left") -> None:
@@ -454,6 +485,10 @@ class WindowBackend(Backend):
 
     def click(self, x: int, y: int, button: str = "left", count: int = 1,
               interval: float = 0.08, hold: float = 0.03) -> None:
+        if self._real is not None:
+            with self._real.burst(self._top_at(x, y)):
+                self._real.click(x, y, button, count)
+            return
         self.mouse_move(x, y)
         self.mouse_down(button)
         self.mouse_up(button)
@@ -478,7 +513,26 @@ class WindowBackend(Backend):
                 self._post(h, BTN_MSG[button][1], self._wparam_buttons(), _lp(cx, cy))
             self._sync(h)
 
+    def drag(self, x0: int, y0: int, x1: int, y1: int, button: str = "left",
+             steps: int = 12, hold: float = 0.15) -> None:
+        if self._real is None:
+            return super().drag(x0, y0, x1, y1, button, steps, hold)
+        with self._real.burst(self._top_at(x0, y0)):
+            self._real.move(x0, y0)
+            time.sleep(0.05)
+            self._real.button(button, True)
+            time.sleep(hold)
+            for i in range(1, steps + 1):
+                self._real.move(round(x0 + (x1 - x0) * i / steps), round(y0 + (y1 - y0) * i / steps))
+                time.sleep(0.015)
+            time.sleep(hold)
+            self._real.button(button, False)
+
     def scroll(self, x: int, y: int, clicks: int, horizontal: bool = False) -> None:
+        if self._real is not None:
+            with self._real.burst(self._top_at(x, y)):
+                self._real.wheel(x, y, clicks, horizontal)
+            return
         hit = self._hit(x, y)
         if hit is None:
             return
@@ -565,6 +619,17 @@ class WindowBackend(Backend):
         keys = parse_combo(combo, self.target_os)
         mods = [k for k in keys if k in MODIFIERS]
         rest = [k for k in keys if k not in MODIFIERS]
+        if self._real is not None:
+            with self._real.burst(self._focus_top()):
+                for m in mods:
+                    self._real.vk(MODIFIERS[m], True)
+                for k in rest:
+                    vk = self._vk(k)
+                    self._real.vk(vk, True, vk in EXTENDED)
+                    self._real.vk(vk, False, vk in EXTENDED)
+                for m in reversed(mods):
+                    self._real.vk(MODIFIERS[m], False)
+            return
         self._mods.update(mods)
         try:
             for k in rest:
@@ -579,7 +644,16 @@ class WindowBackend(Backend):
         finally:
             self._mods.difference_update(mods)
 
+    def _focus_top(self):
+        """Top-level window that holds the keyboard focus (a dialog, or the main window)."""
+        h = self._focus()
+        return (self.api.u.GetAncestor(h, 2) or h) if h else self.hwnd   # GA_ROOT
+
     def type_text(self, text: str, interval: float = 0.0) -> None:
+        if self._real is not None:
+            with self._real.burst(self._focus_top()):
+                self._real.text(text, interval)
+            return
         h = self._focus()
         for ch in text:
             if ch in "\n\r":

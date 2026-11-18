@@ -215,3 +215,38 @@ def test_full_screen_app_minimized_comes_back_full_size_and_reopens_maximized(no
     wp = WINDOWPLACEMENT(length=ctypes.sizeof(WINDOWPLACEMENT))
     u.GetWindowPlacement(b.hwnd, ctypes.byref(wp))
     assert wp.flags & 0x2, "it would no longer reopen maximized"   # WPF_RESTORETOMAXIMIZED
+
+
+@pytest.mark.parametrize("mode", ["send", "real"])
+def test_input_modes_for_apps_that_ignore_posted_messages(notepads, mode):
+    """'send' (synchronous messages) and 'real' (polite real input): the text lands in the app
+    behind; with 'real', the user's window and cursor are given back afterwards."""
+    from ctypes import wintypes
+
+    from sightline import At, Rect, Session
+    from sightline.backends.window_win import WindowBackend, list_windows
+    u = ctypes.windll.user32
+    b = WindowBackend(launch="notepad.exe", title="Notepad", timeout=20, input_mode=mode, idle_ms=0)
+    notepads.append(b.process)
+    edit = _find_text_control(b.hwnd)
+    r = wintypes.RECT()
+    u.GetWindowRect(edit, ctypes.byref(r))
+    area = Rect.from_corners(r.left, r.top, r.right, r.bottom)
+    user = subprocess.Popen(["notepad.exe"])                 # the user's window, in front
+    notepads.append(user)
+    time.sleep(2)
+    user_hwnd = [w for w in list_windows() if w["pid"] == user.pid][0]["hwnd"]
+    u.SetForegroundWindow(user_hwnd)
+    u.SetCursorPos(30, 30)
+    time.sleep(0.5)
+    s = Session(b, timeout=5, trace="off")
+    s.click(At(area))
+    s.press("ctrl+a")
+    s.type(f"mode {mode} é")
+    time.sleep(0.5)
+    assert _text(edit).replace("\r", "") == f"mode {mode} é"
+    assert u.GetForegroundWindow() == user_hwnd, "the user's window was not given back"
+    p = wintypes.POINT()
+    u.GetCursorPos(ctypes.byref(p))
+    assert (p.x, p.y) == (30, 30), "the user's cursor was not put back"
+    s.close()
