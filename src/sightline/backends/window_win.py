@@ -84,6 +84,9 @@ class _Api:
             (u, "GetWindowThreadProcessId"): (wintypes.DWORD, [HW, P]),
             (u, "IsWindowVisible"): (wintypes.BOOL, [HW]), (u, "IsIconic"): (wintypes.BOOL, [HW]),
             (u, "IsWindow"): (wintypes.BOOL, [HW]),
+            (u, "ShowWindow"): (wintypes.BOOL, [HW, ctypes.c_int]),
+            (u, "SetWindowPos"): (wintypes.BOOL, [HW, HW, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                                  ctypes.c_int, wintypes.UINT]),
             (u, "GetWindowTextLengthW"): (ctypes.c_int, [HW]),
             (u, "GetWindowTextW"): (ctypes.c_int, [HW, P, ctypes.c_int]),
             (u, "GetClassNameW"): (ctypes.c_int, [HW, P, ctypes.c_int]),
@@ -170,8 +173,12 @@ class WindowBackend(Backend):
 
     def __init__(self, title: str | None = None, launch: str | list[str] | None = None,
                  cwd: str | None = None, timeout: float = 30.0, regex: bool = False,
-                 modifier_hold: float = 0.15, target_os: str = "windows"):
+                 modifier_hold: float = 0.15, target_os: str = "windows",
+                 restore_minimized: bool = False):
+        """restore_minimized=True: if the app is minimized, restore it BEHIND all other windows
+        without giving it focus (it must be restored to draw anything; you keep working)."""
         super().__init__(target_os)
+        self.restore_minimized = restore_minimized
         if sys.platform != "win32":
             raise SightlineError("the 'window' backend is Windows-only (Linux: 'display' backend)")
         if not title and not launch:
@@ -216,9 +223,29 @@ class WindowBackend(Backend):
             raise SightlineError("the application has no visible window any more (closed?)")
         main = [w for w in wins if w["hwnd"] == self.hwnd]
         if main and main[0]["minimized"]:
-            raise SightlineError("the application window is MINIMIZED, so it draws nothing. Restore "
-                                 "it; it can stay behind other windows or be moved off-screen.")
+            if not self.restore_minimized:
+                raise SightlineError(
+                    "the application window is MINIMIZED, so it draws nothing. Restore it (it can "
+                    "stay behind other windows or be moved off-screen), or use "
+                    "restore_minimized=True to let sightline restore it behind your windows.")
+            self.restore_behind()
+            return self._app_windows_after_restore()
         return [w for w in wins if not w["minimized"]]
+
+    def restore_behind(self) -> None:
+        """Un-minimize the app WITHOUT activating it and put it at the bottom of the window
+        stack: it draws again, your current window keeps the focus and stays on top."""
+        u = self.api.u
+        u.ShowWindow(self.hwnd, 4)                               # SW_SHOWNOACTIVATE
+        u.SetWindowPos(self.hwnd, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)  # HWND_BOTTOM,
+        time.sleep(0.6)                                          # NOSIZE|NOMOVE|NOACTIVATE
+
+    def _app_windows_after_restore(self) -> list[dict]:
+        wins = [w for w in list_windows(self.api) if w["pid"] == self.pid and w["rect"].w > 1
+                and w["rect"].h > 1 and not w["minimized"]]
+        if not wins:
+            raise SightlineError("the application window could not be restored")
+        return wins
 
     def _visible_rect(self, hwnd, rect: Rect) -> Rect:
         """Without Windows 10's invisible resize borders (they would paint black margins)."""

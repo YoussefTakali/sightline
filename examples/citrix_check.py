@@ -34,6 +34,8 @@ def main() -> int:
     ap.add_argument("--text", default="test", help="what to type with --type-into")
     ap.add_argument("--copy-from", help="text of a grid cell to click, then Ctrl+A / Ctrl+C")
     ap.add_argument("--no-wait", action="store_true", help="skip the 5 s 'cover the window' pause")
+    ap.add_argument("--restore", action="store_true",
+                    help="if the window is minimized, restore it behind your windows without asking")
     a = ap.parse_args()
     if sys.platform != "win32":
         print("Run this on the Windows PC where the Citrix app is open.")
@@ -45,18 +47,38 @@ def main() -> int:
         print(f"   -> {'OK ' if ok is True else ('?? ' if ok is None else 'NO ')} {detail}")
 
     print("1. Finding the window")
-    b = WindowBackend(title=a.window, timeout=10)
+    try:
+        b = WindowBackend(title=a.window, timeout=10)
+    except Exception as e:
+        print(f"   -> NO  {str(e).splitlines()[0]}\n   Run `sightline windows` to see the exact titles.")
+        return 1
     mine = [w for w in list_windows() if w["pid"] == b.pid]
     for w in mine:
-        print(f"   {w['class'][:30]:<30} {str(w['rect']):>22}  {w['title']}")
+        state = "  (MINIMIZED)" if w["minimized"] else ""
+        print(f"   {w['class'][:30]:<30} {str(w['rect']):>22}  {w['title']}{state}")
     verdict("window", True, f"{len(mine)} window(s) of that process (pid {b.pid})")
+    if any(w["minimized"] for w in mine if w["hwnd"] == b.hwnd):
+        print("   The window is MINIMIZED: a minimized window draws nothing, so nothing can see it.")
+        answer = "y" if a.restore else input("   Restore it BEHIND your other windows, without taking "
+                                             "the focus? [Y/n] ").strip().lower()
+        if answer in ("", "y", "yes", "o", "oui"):
+            b.restore_behind()
+            b.restore_minimized = True
+            print("   -> restored behind your windows (your current window kept the focus)")
+        else:
+            print("   Restore it yourself (click it in the taskbar), then run this again.")
+            return 1
     s = Session(b, timeout=10, ocr=a.ocr, ocr_lang=a.lang, trace_dir="citrix-check-traces")
 
     print("2. Seeing it in the background")
     if not a.no_wait:
         print("   Cover the Citrix window with another window now (do NOT minimize it)... 5 s")
         time.sleep(5)
-    f = s.capture()
+    try:
+        f = s.capture()
+    except Exception as e:
+        verdict("capture", False, str(e).splitlines()[0])
+        return _summary(results, s)
     f.save("citrix_1_capture.png")
     colours = len(np.unique(f.pixels.reshape(-1, 3)[:: max(1, f.pixels.size // 30000)], axis=0))
     if colours < 4:
@@ -121,6 +143,10 @@ def main() -> int:
         except Exception as e:
             verdict("copy", False, str(e).splitlines()[0] + " (Citrix clipboard policy?)")
 
+    return _summary(results, s)
+
+
+def _summary(results, s) -> int:
     s.close()
     print("\nSummary")
     for step, ok, detail in results:
