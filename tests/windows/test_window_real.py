@@ -515,3 +515,16 @@ def test_window_backend_launches_a_shortcut(notepads, tmp_path, monkeypatch):
     s = Session(b, timeout=5, trace="off")
     assert s.capture().pixels.std() > 5
     s.close()
+
+
+def test_take_over_never_touches_non_citrix_apps(notepads):
+    from sightline.backends.window_win import list_windows
+    from sightline.citrix import disconnect_local
+    from sightline.errors import SightlineError
+    p = subprocess.Popen(["notepad.exe"])
+    notepads.append(p)
+    time.sleep(2)
+    assert disconnect_local("no such window xyz", wait=0) == []
+    with pytest.raises(SightlineError, match="non-Citrix"):
+        disconnect_local("Notepad", wait=0)
+    assert any(w["pid"] == p.pid for w in list_windows()), "notepad must still be open"

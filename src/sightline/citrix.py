@@ -267,3 +267,41 @@ def _open_app(page, app: str, downloads: list, timeout: float) -> None:
                 page.wait_for_timeout(1500)
                 continue
         page.wait_for_timeout(500)
+
+
+# ====================================================================== take over a session
+CITRIX_VIEWERS = ("wfica32.exe", "wfica.exe", "cdviewer.exe")
+
+
+def disconnect_local(window_title: str, wait: float = 3.0) -> list[int]:
+    """Disconnect the Citrix session that shows `window_title` on the user's desktop, by
+    closing the local Citrix VIEWER process only. The app keeps running on the Citrix server;
+    the next launch of it reconnects to the same session (same screens, same data) - e.g. on
+    a hidden desktop. Refuses to touch anything that is not a Citrix viewer.
+    Returns the closed process ids ([] if no such window is open)."""
+    if sys.platform != "win32":
+        raise SightlineError("disconnect_local is Windows-only")
+    import ctypes
+    from ctypes import wintypes
+
+    from .backends.window_win import _exe_name, list_windows
+    needle = window_title.lower()
+    pids = {w["pid"] for w in list_windows() if needle in w["title"].lower()}
+    if not pids:
+        return []
+    others = {p: _exe_name(p) for p in pids if _exe_name(p) not in CITRIX_VIEWERS}
+    if others:
+        raise SightlineError(f"windows titled {window_title!r} belong to non-Citrix programs "
+                             f"{sorted(set(others.values()))}: not touching them")
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.OpenProcess.restype = wintypes.HANDLE
+    k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    k.CloseHandle.argtypes = [wintypes.HANDLE]
+    for pid in pids:
+        h = k.OpenProcess(0x0001, False, pid)                 # PROCESS_TERMINATE
+        if h:
+            k.TerminateProcess(h, 0)
+            k.CloseHandle(h)
+    time.sleep(wait)                                          # let the server see the disconnect
+    return sorted(pids)

@@ -40,13 +40,24 @@ ap.add_argument("--app", help="Citrix: the application's name as shown in the po
 ap.add_argument("--profile", help="Citrix: browser profile folder used with `sightline browser-login`")
 ap.add_argument("--sso", help="Citrix: domain for Windows single sign-on, e.g. *.company.com")
 ap.add_argument("--headed", action="store_true", help="Citrix: show the portal browser (to debug)")
+ap.add_argument("--take-over", metavar="WINDOW_TITLE",
+                help="Citrix: MOVE the session already open on your screen (window title, e.g. "
+                     "PHILEAS) to the hidden desktop: disconnect it here, reconnect it there")
 a = ap.parse_args()
 
 launch, timeout = a.launch, 60
 if a.portal:
     if not (a.app and a.profile):
         ap.error("--portal needs --app and --profile")
-    from sightline.citrix import fetch_ica
+    from sightline.citrix import disconnect_local, fetch_ica
+    if a.take_over:
+        ok = input(f"   Move the Citrix session showing {a.take_over!r} to the hidden desktop? "
+                   "It disappears from your screen and keeps running there. [y/N] ")
+        if ok.strip().lower() not in ("y", "yes", "o", "oui"):
+            sys.exit("cancelled")
+        closed = disconnect_local(a.take_over)
+        print(f"   disconnected the local Citrix viewer (pids {closed})" if closed else
+              f"   no window {a.take_over!r} open: a new session will be started")
     print(f"0. Fetching a fresh .ica for {a.app!r} from {a.portal} (headless browser)")
     a.launch = fetch_ica(a.portal, a.app, a.profile, headless=not a.headed,
                          browser_args=[f"--auth-server-allowlist={a.sso}"] if a.sso else None)

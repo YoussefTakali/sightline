@@ -206,7 +206,9 @@ class HiddenDesktopBackend(Backend):
         by an earlier session (keep_app=True), without launching it again.
         keep_app=False: the app is closed with the session (nobody could see it otherwise).
         citrix={"portal": url, "app": name, "user_data_dir": dir}: a Citrix app from a web
-        portal - its .ica is fetched headless (never auto-opened) and opened here."""
+        portal - its .ica is fetched headless (never auto-opened) and opened here.
+        Add "take_over": True (or a window title) to MOVE an already open session here: the
+        Citrix viewer on the user's desktop is closed (disconnect) and the launch reconnects."""
         super().__init__(target_os)
         if sys.platform != "win32":
             raise SightlineError("the 'hidden' backend is Windows-only (Linux: 'display' backend)")
@@ -219,6 +221,12 @@ class HiddenDesktopBackend(Backend):
             from ..citrix import citrix_launch, fetch_ica
             c = dict(citrix)
             windowed, size = c.pop("windowed", True), tuple(c.pop("size", (1920, 1080)))
+            take_over = c.pop("take_over", False)
+            if take_over:
+                # the app is already open on the user's screen: disconnect that viewer, the
+                # launch below reconnects the SAME session here (screens and data kept)
+                from ..citrix import disconnect_local
+                disconnect_local(take_over if isinstance(take_over, str) else c["app"])
             launch = citrix_launch(fetch_ica(**c), windowed=windowed, size=size)
             timeout = max(timeout, 180.0)                     # a Citrix logon takes a while
         if not launch and not (desktop and title):
