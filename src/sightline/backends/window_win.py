@@ -174,11 +174,16 @@ class WindowBackend(Backend):
     def __init__(self, title: str | None = None, launch: str | list[str] | None = None,
                  cwd: str | None = None, timeout: float = 30.0, regex: bool = False,
                  modifier_hold: float = 0.15, target_os: str = "windows",
-                 restore_minimized: bool = False):
+                 restore_minimized: bool = False, reminimize: bool = True):
         """restore_minimized=True: if the app is minimized, restore it BEHIND all other windows
-        without giving it focus (it must be restored to draw anything; you keep working)."""
+        without giving it focus (a minimized window draws nothing - with Citrix seamless the
+        server even stops sending it - so it must be restored to be seen; you keep working).
+        reminimize=True: when the session closes, minimize it again (without activating it)
+        if sightline was the one that restored it - your taskbar looks as before the run."""
         super().__init__(target_os)
         self.restore_minimized = restore_minimized
+        self.reminimize = reminimize
+        self._restored_by_us = False
         if sys.platform != "win32":
             raise SightlineError("the 'window' backend is Windows-only (Linux: 'display' backend)")
         if not title and not launch:
@@ -236,6 +241,7 @@ class WindowBackend(Backend):
         """Un-minimize the app WITHOUT activating it and put it at the bottom of the window
         stack: it draws again, your current window keeps the focus and stays on top."""
         u = self.api.u
+        self._restored_by_us = True
         u.ShowWindow(self.hwnd, 4)                               # SW_SHOWNOACTIVATE
         u.SetWindowPos(self.hwnd, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)  # HWND_BOTTOM,
         time.sleep(0.6)                                          # NOSIZE|NOMOVE|NOACTIVATE
@@ -569,7 +575,10 @@ class WindowBackend(Backend):
         _win_clipboard_set(text)
 
     def close(self) -> None:
-        pass                                   # never closes the user's application
+        # never closes the user's application; puts it back the way it was found
+        if self._restored_by_us and self.reminimize and self.api.u.IsWindow(self.hwnd):
+            self.api.u.ShowWindow(self.hwnd, 7)                  # SW_SHOWMINNOACTIVE
+            self._restored_by_us = False
 
 
 def _utf16_units(ch: str) -> list[int]:

@@ -60,11 +60,12 @@ def main() -> int:
     if any(w["minimized"] for w in mine if w["hwnd"] == b.hwnd):
         print("   The window is MINIMIZED: a minimized window draws nothing, so nothing can see it.")
         answer = "y" if a.restore else input("   Restore it BEHIND your other windows, without taking "
-                                             "the focus? [Y/n] ").strip().lower()
+                                             "the focus (minimized again at the end)? [Y/n] ").strip().lower()
         if answer in ("", "y", "yes", "o", "oui"):
             b.restore_behind()
             b.restore_minimized = True
-            print("   -> restored behind your windows (your current window kept the focus)")
+            print("   -> restored behind your windows (your current window kept the focus); "
+                  "it will be minimized again at the end")
         else:
             print("   Restore it yourself (click it in the taskbar), then run this again.")
             return 1

@@ -124,3 +124,25 @@ def test_minimized_app_is_restored_behind_without_taking_focus(notepads, tmp_pat
     assert u.GetForegroundWindow() == fg_before, "the user's foreground window lost the focus"
     assert frame.width > 100 and frame.pixels.std() > 5
     frame.save(str(tmp_path / "restored_behind.png"))
+
+
+def test_restored_app_is_minimized_again_when_the_session_closes(notepads, tmp_path):
+    from sightline import Session
+    from sightline.backends.window_win import WindowBackend, list_windows
+    u = ctypes.windll.user32
+    b = WindowBackend(launch="notepad.exe", title="Notepad", timeout=20, restore_minimized=True)
+    notepads.append(b.process)
+    other = subprocess.Popen(["notepad.exe"])
+    notepads.append(other)
+    time.sleep(2)
+    u.SetForegroundWindow([w for w in list_windows() if w["pid"] == other.pid][0]["hwnd"])
+    u.ShowWindow(b.hwnd, 6)                                  # the user minimized the app
+    time.sleep(1)
+    fg = u.GetForegroundWindow()
+    s = Session(b, timeout=5, trace="off")
+    s.capture()                                              # restored behind for the run
+    assert not [w for w in list_windows() if w["hwnd"] == b.hwnd][0]["minimized"]
+    s.close()                                                # ...and minimized again
+    time.sleep(1)
+    assert [w for w in list_windows() if w["hwnd"] == b.hwnd][0]["minimized"]
+    assert u.GetForegroundWindow() == fg

@@ -33,11 +33,11 @@ What it does:
 - **Clipboard**: the app is local, so it is the user's clipboard: the session saves its
   text and puts it back after each copy.
 
-Rules for the user:
-
-- **Never minimize** the app: a minimized window draws nothing. Leave it behind other
-  windows, or park it off-screen.
-- The user can use the mouse, keyboard and other apps normally.
+Minimized apps: a minimized window draws **nothing** (with Citrix seamless, the server even
+stops sending it), so no tool can see it. With `restore_minimized = true` in the profile,
+sightline restores it **behind your windows without taking the focus** when it needs it,
+and **minimizes it again** when the run ends: your taskbar looks the same before and after,
+and you keep working in front during the run.
 
 Limits (measured per app by the doctor):
 
