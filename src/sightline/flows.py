@@ -62,7 +62,7 @@ def load_flow(path: str | os.PathLike) -> Flow:
     try:
         import yaml
     except ImportError as exc:
-        raise SightlineError("YAML flows need: pip install 'sightline[flows]'") from exc
+        raise SightlineError("YAML flows need: pip install pyyaml") from exc
     p = Path(path)
     data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):

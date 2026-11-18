@@ -73,7 +73,7 @@ class BrowserBackend(Backend):
         try:
             from playwright.sync_api import sync_playwright
         except ImportError as exc:
-            raise SightlineError("Browser backend needs: pip install 'sightline[browser]'") from exc
+            raise SightlineError("Browser backend needs: pip install playwright") from exc
         self._pw = sync_playwright().start()
         kind = getattr(self._pw, browser)
         w, h = (int(v) for v in viewport)

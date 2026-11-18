@@ -119,6 +119,6 @@ with Session.from_profile("citrix-web") as s:
 | Piece | How |
 |---|---|
 | Python | python.org installer → *Install for me only* (or the company's Python) |
-| sightline + Playwright | `pip install --user sightline[browser,ocr]` (no admin) |
+| sightline + Playwright | clone the repo, then `pip install -e ".[browser,ocr-pip]"` in a virtual environment (no admin) |
 | Browser | the installed Edge (`channel="msedge"`): no download |
 | OCR | Tesseract's installer may need admin → use a portable copy (`tesseract_cmd=`), or the pip-only OCR engine planned next (RapidOCR/ONNX) |

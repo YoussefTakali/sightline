@@ -157,7 +157,7 @@ look of a button is one more file, never a script change. Create them with
 | `replay` | recorded screenshots: test locators and readers offline | |
 
 OCR: `ocr = "tesseract"` (needs the program; `ocr_lang = "fra+eng"`) or `ocr = "rapidocr"`
-(`pip install sightline[ocr-pip]`, no admin). Default `auto` tries Tesseract, then RapidOCR.
+(`pip install rapidocr-onnxruntime`, no admin). Default `auto` tries Tesseract, then RapidOCR.
 
 ## CLI
 

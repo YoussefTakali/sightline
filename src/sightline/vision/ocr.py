@@ -209,7 +209,7 @@ class TesseractOcr:
         try:
             import pytesseract
         except ImportError as exc:
-            raise SightlineError("OCR needs: pip install 'sightline[ocr]' and the "
+            raise SightlineError("OCR needs: pip install pytesseract and the "
                                  "tesseract program") from exc
         if tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = tesseract_cmd

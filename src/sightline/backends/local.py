@@ -81,7 +81,7 @@ class LocalBackend(Backend):
             import mss
             from pynput import keyboard, mouse
         except ImportError as exc:
-            raise SightlineError("Local backend needs: pip install 'sightline[local]'") from exc
+            raise SightlineError("Local backend needs: pip install mss pynput") from exc
         self._mss = mss.mss()
         mons = self._mss.monitors
         if not 0 <= monitor < len(mons):

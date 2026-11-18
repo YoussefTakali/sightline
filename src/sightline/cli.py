@@ -295,7 +295,7 @@ def cmd_run(args, extra):
     try:
         import pytest
     except ImportError:
-        raise SightlineError("sightline run needs: pip install 'sightline[run]'") from None
+        raise SightlineError("sightline run needs: pip install pytest pyyaml") from None
     from importlib.metadata import entry_points
     paths = args.paths or [p for p in ("tests", "flows") if os.path.isdir(p)] or ["."]
     pargs = list(paths)

@@ -32,7 +32,7 @@ class OculiXBackend(Backend):
         try:
             from py4j.java_gateway import GatewayParameters, JavaGateway, launch_gateway
         except ImportError as exc:
-            raise SightlineError("OculiX backend needs: pip install 'sightline[oculix]'") from exc
+            raise SightlineError("OculiX backend needs: pip install py4j") from exc
         jar = jar_path or os.getenv("OCULIX_JAR")
         if not jar or not Path(jar).exists():
             raise SightlineError(f"OculiX jar not found: {jar!r} (set jar_path or OCULIX_JAR)")
