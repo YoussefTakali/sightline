@@ -29,6 +29,7 @@ jobs:
 
   windows-real:                 # the background 'window' backend on a real Windows desktop
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,13 +42,17 @@ jobs:
 
   e2e-linux:                    # VNC, web client, Citrix-like lab, private displays, Wine
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
       - run: pip install -e ".[dev]"
-      - run: pytest tests/test_e2e_headless.py tests/test_e2e_browser.py tests/test_e2e_citrix_lab.py -q
+      - name: end-to-end (a hang dumps every thread's stack after 5 min)
+        run: >
+          timeout 1500 pytest tests/test_e2e_headless.py tests/test_e2e_browser.py
+          tests/test_e2e_citrix_lab.py -v -o faulthandler_timeout=300 --durations=15
       - name: private displays (dev container)
         run: |
           docker build -t sightline-dev docker/dev

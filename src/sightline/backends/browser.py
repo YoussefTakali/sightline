@@ -49,8 +49,12 @@ CLIPBOARD_JS = {
     # it the remote clipboard keeps its old owner, and an app that copies again while it
     # already owns the clipboard (Tk, other X11 apps) never notifies the gateway: only the
     # first copy would arrive - measured with Guacamole over both VNC and RDP.
-    "navigator": ("() => navigator.clipboard.readText()",
-                  "t => navigator.clipboard.writeText(t)"
+    # (each call is bounded to 5 s inside the page: a clipboard promise can stay pending
+    # forever - no focus, a permission prompt - and page.evaluate has no timeout of its own)
+    "navigator": ("() => Promise.race([navigator.clipboard.readText(), new Promise((_, no) => "
+                  "setTimeout(() => no(new Error('clipboard read timed out')), 5000))])",
+                  "t => Promise.race([navigator.clipboard.writeText(t), new Promise((_, no) => "
+                  "setTimeout(() => no(new Error('clipboard write timed out')), 5000))])"
                   ".then(() => window.dispatchEvent(new Event('focus')))"),
     # noVNC: its clipboard panel mirrors the remote clipboard
     "novnc": ("() => document.getElementById('noVNC_clipboard_text').value",

@@ -87,7 +87,9 @@ class VNCBackend(Backend):
         self._pos = (0, 0)
         self._zlib = zlib.decompressobj()
         self._handshake(password, shared)
-        self._sock.settimeout(None)
+        # never block forever: a send to a stalled server fails after 10 s; the reader treats
+        # an idle timeout as "nothing new yet" (see _recv)
+        self._sock.settimeout(10.0)
         # ENC_CURSOR: "I draw the cursor myself" -> the server stops painting it into the
         # framebuffer, so captures are cursor-free (a cursor over a small icon or a
         # checkbox otherwise breaks matching). We simply never draw it.
@@ -98,6 +100,7 @@ class VNCBackend(Backend):
         self._send(struct.pack(">BxH", 2, len(encodings)) +
                    b"".join(struct.pack(">i", e) for e in encodings))
         self._request(incremental=False)
+        self._reader_started = True
         self._thread = threading.Thread(target=self._reader, name="vnc-reader", daemon=True)
         self._thread.start()
         self._wait_serial(0, timeout)
@@ -105,7 +108,12 @@ class VNCBackend(Backend):
     # ------------------------------------------------------------------ protocol
     def _recv(self, n: int) -> bytes:
         while len(self._buf) < n:
-            chunk = self._sock.recv(max(65536, n - len(self._buf)))
+            try:
+                chunk = self._sock.recv(max(65536, n - len(self._buf)))
+            except TimeoutError:
+                if self._closed or not getattr(self, "_reader_started", False):
+                    raise                                 # handshake: a real timeout
+                continue                                  # idle screen: keep waiting
             if not chunk:
                 raise ConnectionError("VNC server closed the connection")
             self._buf += chunk
