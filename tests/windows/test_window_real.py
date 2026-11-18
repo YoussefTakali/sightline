@@ -311,3 +311,84 @@ def test_auto_keeps_background_messages_for_an_app_that_obeys_them(notepads, tmp
     assert _text(edit).replace("\r", "") == "auto mode"
     assert b.input_mode == "post", "a normal app must stay in the never-interrupting mode"
     s.close()
+
+
+def _alpha(hwnd):
+    from ctypes import wintypes
+    k, a, f = wintypes.DWORD(), wintypes.BYTE(), wintypes.DWORD()
+    ok = ctypes.windll.user32.GetLayeredWindowAttributes(hwnd, ctypes.byref(k), ctypes.byref(a), ctypes.byref(f))
+    return a.value if ok and f.value & 2 else 255
+
+
+def test_minimized_app_works_invisibly(notepads, tmp_path, monkeypatch):
+    """restore_minimized='invisible': the minimized app is never seen - opacity 0 while it
+    works - yet it is captured and typed into; back to minimized + opaque at the end."""
+    from ctypes import wintypes
+
+    from sightline import At, Rect, Session
+    from sightline.backends.window_win import WindowBackend, list_windows
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    u = ctypes.windll.user32
+    b = WindowBackend(launch="notepad.exe", title="Notepad", timeout=20,
+                      restore_minimized="invisible", idle_ms=0)
+    notepads.append(b.process)
+    edit = _find_text_control(b.hwnd)
+    ex_before = ctypes.windll.user32.GetWindowLongW(b.hwnd, -20)
+    user = subprocess.Popen(["notepad.exe"])
+    notepads.append(user)
+    time.sleep(2)
+    user_hwnd = [w for w in list_windows() if w["pid"] == user.pid][0]["hwnd"]
+    u.SetForegroundWindow(user_hwnd)
+    u.ShowWindow(b.hwnd, 6)                                  # the user minimizes the app
+    time.sleep(1)
+    s = Session(b, timeout=5, trace="off")
+    frame = s.capture()                                      # invisible but drawing
+    assert not [w for w in list_windows() if w["hwnd"] == b.hwnd][0]["minimized"]
+    assert _alpha(b.hwnd) == 0, "the app must be invisible while it works"
+    assert frame.pixels.std() > 5, "an invisible window must still be captured"
+    r = wintypes.RECT()
+    u.GetWindowRect(edit, ctypes.byref(r))
+    s.type("invisible é", into=At(Rect.from_corners(r.left, r.top, r.right, r.bottom)))
+    time.sleep(0.5)
+    assert _text(edit).replace("\r", "") == "invisible é"
+    assert _alpha(b.hwnd) == 0 and u.GetForegroundWindow() == user_hwnd
+    s.close()
+    time.sleep(1)
+    assert [w for w in list_windows() if w["hwnd"] == b.hwnd][0]["minimized"]
+    assert ctypes.windll.user32.GetWindowLongW(b.hwnd, -20) == ex_before, "style not restored"
+
+
+def test_citrix_like_app_clicked_with_real_input_while_invisible(notepads, tmp_path, monkeypatch):
+    """The raw-input-only app (Citrix-like), minimized: made invisible, and 'auto' clicks it
+    with REAL input through an invisible on-top window - one click, never shown, user's
+    window and focus given back."""
+    import os
+    import sys
+
+    from sightline import Session
+    from sightline.backends.window_win import WindowBackend, list_windows
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    u = ctypes.windll.user32
+    app = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), "raw_input_app.py")])
+    notepads.append(app)
+    user = subprocess.Popen(["notepad.exe"])
+    notepads.append(user)
+    time.sleep(3)
+    b = WindowBackend(title="RawOnly Test", timeout=20, restore_minimized="invisible", idle_ms=0)
+    user_hwnd = [w for w in list_windows() if w["pid"] == user.pid][0]["hwnd"]
+    u.SetForegroundWindow(user_hwnd)
+    u.ShowWindow(b.hwnd, 6)
+    time.sleep(1)
+    s = Session(b, timeout=5, trace="off")
+    f = s.capture()
+    assert _alpha(b.hwnd) == 0
+    s.click((f.origin_x + f.width // 2, f.origin_y + f.height // 2))
+    time.sleep(1)
+    title = [w for w in list_windows() if w["pid"] == app.pid][0]["title"]
+    assert title.endswith("clicks 1"), title
+    assert b.input_mode == "real"
+    assert _alpha(b.hwnd) == 0, "the app must be invisible again right after the click"
+    assert u.GetForegroundWindow() == user_hwnd
+    s.close()
+    time.sleep(1)
+    assert [w for w in list_windows() if w["pid"] == app.pid][0]["minimized"]

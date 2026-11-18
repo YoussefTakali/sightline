@@ -70,13 +70,14 @@ def main() -> int:
     verdict("window", True, f"{len(mine)} window(s) of that process (pid {b.pid})")
     if any(w["minimized"] for w in mine if w["hwnd"] == b.hwnd):
         print("   The window is MINIMIZED: a minimized window draws nothing, so nothing can see it.")
-        answer = "y" if a.restore else input("   Restore it BEHIND your other windows, without taking "
-                                             "the focus (minimized again at the end)? [Y/n] ").strip().lower()
+        answer = "y" if a.restore else input("   Make it INVISIBLE (it draws, you don't see it) so "
+                                             "sightline can work with it? Minimized again at the "
+                                             "end. [Y/n] ").strip().lower()
         if answer in ("", "y", "yes", "o", "oui"):
+            b.restore_minimized = "invisible"
             b.restore_behind()
-            b.restore_minimized = True
-            print("   -> restored behind your windows (your current window kept the focus); "
-                  "it will be minimized again at the end")
+            print("   -> invisible and drawing (you keep your screen and focus); it will be "
+                  "minimized again at the end")
         else:
             print("   Restore it yourself (click it in the taskbar), then run this again.")
             return 1

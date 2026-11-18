@@ -241,7 +241,7 @@ backend = "local"
 backend = "window"
 [profiles.background.connection]
 title = "{title}"
-restore_minimized = true         # app minimized? restored behind your windows, re-minimized after
+restore_minimized = "invisible"  # app minimized? kept invisible but drawing, re-minimized after
 
 [profiles.private-display]       # Linux: the app on an invisible display
 backend = "display"

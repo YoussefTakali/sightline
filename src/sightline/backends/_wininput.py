@@ -112,22 +112,28 @@ class RealInput:
         return False
 
     @contextmanager
-    def burst(self, hwnd):
-        """with real.burst(hwnd): ... real input ...  - then the user gets everything back."""
+    def burst(self, hwnd, before=None, after=None):
+        """with real.burst(hwnd): ... real input ...  - then the user gets everything back.
+        before/after: hooks around it (the invisible mode puts the window on top at
+        opacity 1/255 before, and back down, fully transparent, after)."""
         self.wait_for_idle()
         u = self.u
         prev_fg = u.GetForegroundWindow()
         pos = wintypes.POINT()
         u.GetCursorPos(ctypes.byref(pos))
-        if not self._activate(hwnd):
-            raise RuntimeError("could not bring the application to the front for real input")
+        if before:
+            before()
         try:
+            if not self._activate(hwnd):
+                raise RuntimeError("could not bring the application to the front for real input")
             yield
             time.sleep(0.05)                                      # let the input be consumed
         finally:
             u.SetCursorPos(pos.x, pos.y)
             if prev_fg and prev_fg != hwnd and u.IsWindow(prev_fg):
                 self._activate(prev_fg)
+            if after:
+                after()
 
     # ---------------------------------------------------------------- primitives
     def _send(self, *inputs: INPUT) -> None:

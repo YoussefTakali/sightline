@@ -61,7 +61,7 @@ target_os = "windows"
 backend = "window"
 [profiles.local-windows.connection]
 title = "Gestion des commandes"            # part of the window title
-restore_minimized = true                   # minimized? restored BEHIND your windows, re-minimized after
+restore_minimized = "invisible"            # minimized? made invisible+drawing, re-minimized after
 # launch = 'C:\Program Files\App\app.exe'  # optional: start it too
 
 # Linux: the app runs on a private invisible display (Xvfb, as your user): fully headless

@@ -96,6 +96,9 @@ class _Api:
             (u, "GetMonitorInfoW"): (wintypes.BOOL, [H, P]),
             (u, "IsZoomed"): (wintypes.BOOL, [HW]),
             (u, "GetAncestor"): (HW, [HW, wintypes.UINT]),
+            (u, "SetLayeredWindowAttributes"): (wintypes.BOOL, [HW, wintypes.DWORD, wintypes.BYTE,
+                                                                wintypes.DWORD]),
+            (u, "GetLayeredWindowAttributes"): (wintypes.BOOL, [HW, P, P, P]),
             (u, "SetWindowPos"): (wintypes.BOOL, [HW, HW, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                                   ctypes.c_int, wintypes.UINT]),
             (u, "GetWindowTextLengthW"): (ctypes.c_int, [HW]),
@@ -121,6 +124,13 @@ class _Api:
             f = getattr(dll, name)
             f.restype, f.argtypes = res, args
         self.GetClassLong = getattr(u, "GetClassLongPtrW" if ctypes.sizeof(P) == 8 else "GetClassLongW")
+        wide = ctypes.sizeof(P) == 8
+        self.GetWindowLong = getattr(u, "GetWindowLongPtrW" if wide else "GetWindowLongW")
+        self.SetWindowLong = getattr(u, "SetWindowLongPtrW" if wide else "SetWindowLongW")
+        self.GetWindowLong.restype = ctypes.c_ssize_t
+        self.GetWindowLong.argtypes = [HW, ctypes.c_int]
+        self.SetWindowLong.restype = ctypes.c_ssize_t
+        self.SetWindowLong.argtypes = [HW, ctypes.c_int, ctypes.c_ssize_t]
         try:
             self.dwm = ctypes.WinDLL("dwmapi")
             self.dwm.DwmGetWindowAttribute.argtypes = [HW, wintypes.DWORD, P, wintypes.DWORD]
@@ -196,14 +206,20 @@ class WindowBackend(Backend):
     def __init__(self, title: str | None = None, launch: str | list[str] | None = None,
                  cwd: str | None = None, timeout: float = 30.0, regex: bool = False,
                  modifier_hold: float = 0.15, target_os: str = "windows",
-                 restore_minimized: bool = False, reminimize: bool = True,
+                 restore_minimized: bool | str = False, reminimize: bool = True,
                  input_mode: str = "auto", idle_ms: int = 800):
-        """restore_minimized=True: if the app is minimized, restore it BEHIND all other windows
-        without giving it focus (a minimized window draws nothing - with Citrix seamless the
-        server even stops sending it - so it must be restored to be seen; you keep working).
-        reminimize=True: when the session closes, minimize it again (without activating it)
-        if sightline was the one that restored it - your taskbar looks as before the run."""
+        """A minimized window draws nothing (with Citrix seamless the server even stops sending
+        it), so to be seen it must not stay minimized:
+        restore_minimized="invisible": made fully TRANSPARENT first, then restored at the
+            bottom of the window stack - it draws (sightline sees it), you never see it;
+        restore_minimized=True / "behind": restored behind your windows (visible behind them).
+        Real input in invisible mode puts the window on top at opacity 1/255 for the click -
+        it never visibly appears. reminimize=True: at the end it is minimized again and its
+        opacity put back - your taskbar looks as before the run."""
         super().__init__(target_os)
+        if restore_minimized not in (False, True, "behind", "invisible"):
+            raise SightlineError("restore_minimized must be False, True/'behind' or 'invisible'")
+        self._ghost_saved = None
         if input_mode not in ("auto", "post", "send", "real"):
             raise SightlineError("input_mode must be 'auto', 'post', 'send' or 'real'")
         # post: queued window messages (never interrupts; some apps ignore them)
@@ -287,6 +303,8 @@ class WindowBackend(Backend):
         u.GetWindowPlacement(self.hwnd, ctypes.byref(wp))
         self._placement = wp                                     # to put it back exactly
         self._restored_by_us = True
+        if self.restore_minimized == "invisible":
+            self._make_invisible()                               # BEFORE it appears: no flash
         u.ShowWindow(self.hwnd, 4)                               # SW_SHOWNOACTIVATE
         if wp.flags & 0x2:                                       # WPF_RESTORETOMAXIMIZED
             # it was FULL SCREEN (maximized) before being minimized. Windows has no "maximize
@@ -300,6 +318,60 @@ class WindowBackend(Backend):
         else:
             u.SetWindowPos(self.hwnd, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)  # HWND_BOTTOM,
         time.sleep(0.6)                                          # NOSIZE|NOMOVE|NOACTIVATE
+
+    # ================================================================== invisible mode
+    def _make_invisible(self) -> bool:
+        """Opacity 0 (layered window), keeping any colour key the app already uses (Citrix
+        seamless windows can be layered). False if the window manages its own layering."""
+        if self._ghost_saved is not None:
+            return True
+        u, h = self.api.u, self.hwnd
+        ex = self.api.GetWindowLong(h, -20)                      # GWL_EXSTYLE
+        layered = bool(ex & 0x80000)                             # WS_EX_LAYERED
+        key, alpha, flags = wintypes.DWORD(), wintypes.BYTE(), wintypes.DWORD()
+        if layered and not u.GetLayeredWindowAttributes(h, ctypes.byref(key), ctypes.byref(alpha),
+                                                        ctypes.byref(flags)):
+            log.warning("window uses per-pixel layering: cannot make it invisible")
+            return False
+        self._ghost_saved = (ex, layered, key.value, alpha.value if flags.value & 2 else 255,
+                             flags.value)
+        if not layered:
+            self.api.SetWindowLong(h, -20, ex | 0x80000)
+        self._set_opacity(0)
+        return True
+
+    def _set_opacity(self, a: int) -> None:
+        ex, layered, key, _alpha, flags = self._ghost_saved
+        self.api.u.SetLayeredWindowAttributes(self.hwnd, key, a, (flags & 0x1) | 0x2)  # +LWA_ALPHA
+
+    def _restore_opacity(self) -> None:
+        if self._ghost_saved is None:
+            return
+        ex, layered, key, alpha, flags = self._ghost_saved
+        if layered:
+            self.api.u.SetLayeredWindowAttributes(self.hwnd, key, alpha, flags or 0x2)
+        else:
+            self._set_opacity(255)
+            self.api.SetWindowLong(self.hwnd, -20, ex)
+        self._ghost_saved = None
+
+    def _ghost_on_top(self) -> None:
+        """For a real click on an invisible window: on top, at opacity 1/255 (receives the
+        click, cannot be seen)."""
+        self._set_opacity(1)
+        self.api.u.SetWindowPos(self.hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)  # TOPMOST
+
+    def _ghost_back(self) -> None:
+        u = self.api.u
+        u.SetWindowPos(self.hwnd, -2, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)   # NOTOPMOST
+        u.SetWindowPos(self.hwnd, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)    # BOTTOM
+        self._set_opacity(0)
+
+    def _burst(self, hwnd):
+        """Real-input burst; invisible windows are clicked without ever being seen."""
+        if self._ghost_saved is not None:
+            return self._real.burst(self.hwnd, before=self._ghost_on_top, after=self._ghost_back)
+        return self._real.burst(hwnd)
 
     def _app_windows_after_restore(self) -> list[dict]:
         wins = [w for w in list_windows(self.api) if w["pid"] == self.pid and w["rect"].w > 1
@@ -569,7 +641,7 @@ class WindowBackend(Backend):
     def _click_once(self, x: int, y: int, button: str = "left", count: int = 1,
                     interval: float = 0.08, hold: float = 0.03) -> None:
         if self._real is not None:
-            with self._real.burst(self._top_at(x, y)):
+            with self._burst(self._top_at(x, y)):
                 self._real.click(x, y, button, count)
             return
         self.mouse_move(x, y)
@@ -600,7 +672,7 @@ class WindowBackend(Backend):
              steps: int = 12, hold: float = 0.15) -> None:
         if self._real is None:
             return super().drag(x0, y0, x1, y1, button, steps, hold)
-        with self._real.burst(self._top_at(x0, y0)):
+        with self._burst(self._top_at(x0, y0)):
             self._real.move(x0, y0)
             time.sleep(0.05)
             self._real.button(button, True)
@@ -613,7 +685,7 @@ class WindowBackend(Backend):
 
     def scroll(self, x: int, y: int, clicks: int, horizontal: bool = False) -> None:
         if self._real is not None:
-            with self._real.burst(self._top_at(x, y)):
+            with self._burst(self._top_at(x, y)):
                 self._real.wheel(x, y, clicks, horizontal)
             return
         hit = self._hit(x, y)
@@ -703,7 +775,7 @@ class WindowBackend(Backend):
         mods = [k for k in keys if k in MODIFIERS]
         rest = [k for k in keys if k not in MODIFIERS]
         if self._real is not None:
-            with self._real.burst(self._focus_top()):
+            with self._burst(self._focus_top()):
                 for m in mods:
                     self._real.vk(MODIFIERS[m], True)
                 for k in rest:
@@ -739,7 +811,7 @@ class WindowBackend(Backend):
 
     def _type_once(self, text: str, interval: float = 0.0) -> None:
         if self._real is not None:
-            with self._real.burst(self._focus_top()):
+            with self._burst(self._focus_top()):
                 self._real.text(text, interval)
             return
         h = self._focus()
@@ -778,6 +850,8 @@ class WindowBackend(Backend):
             if not u.IsIconic(self.hwnd):                        # placement refused: still minimize
                 u.ShowWindow(self.hwnd, 7)
             self._restored_by_us = False
+        if self.api.u.IsWindow(self.hwnd):
+            self._restore_opacity()                              # minimized first: no flash
 
 
 def _exe_name(pid: int) -> str:
