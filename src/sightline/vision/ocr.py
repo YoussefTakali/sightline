@@ -355,4 +355,6 @@ def make_ocr(engine: str = "tesseract", lang: str = "eng"):
         try:
             return RapidOcr()
         except SightlineError:
-            raise first from None
+            raise SightlineError(
+                "No OCR engine available. Either `pip install rapidocr-onnxruntime` (pip only, "
+                f"no admin rights), or install Tesseract. Tesseract said: {first}") from None
