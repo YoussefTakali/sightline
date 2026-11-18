@@ -51,6 +51,7 @@ ignore = ["E741", "SIM105", "SIM108", "B905", "E731"]
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E402", "B011"]
 "tools/*" = ["E402"]
+"examples/*" = ["E402"]                          # path setup before importing sightline
 "src/sightline/inspector.py" = ["E501"]          # the embedded HTML/JS page
 "src/sightline/vision/winocr.py" = ["E501"]      # the embedded PowerShell script
 "src/sightline/__init__.py" = ["E402"]           # dependency check BEFORE the imports

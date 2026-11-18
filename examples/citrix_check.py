@@ -14,11 +14,16 @@ Nothing is clicked or typed unless you ask for it with an option.
 Only use --click-text / --type-into on something harmless (a search field, a tab).
 """
 import argparse
+
+# use the sightline code NEXT TO this script (this download), not an older copy that
+# `pip install -e .` may have registered from another folder
+import os
 import sys
 import time
 
 import numpy as np
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 from sightline import Session, Text
 from sightline.backends.window_win import WindowBackend, list_windows
 from sightline.frame import region_changed
@@ -50,6 +55,8 @@ def main() -> int:
         results.append((step, ok, detail))
         print(f"   -> {'OK ' if ok is True else ('?? ' if ok is None else 'NO ')} {detail}")
 
+    import sightline
+    print(f"sightline used: {os.path.dirname(sightline.__file__)}")
     print("1. Finding the window")
     try:
         b = WindowBackend(title=a.window, timeout=10, input_mode=a.click_mode)

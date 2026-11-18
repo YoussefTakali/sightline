@@ -6,9 +6,13 @@ During the 5-second countdown: put another window OVER the app (a browser...) an
 using your mouse. Then open the three try_*.png pictures: they must show the app's content
 even though it was covered, with the typed text appearing.
 """
+# use the sightline code NEXT TO this script (this download), not an older copy that
+# `pip install -e .` may have registered from another folder
+import os
 import sys
 import time
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 from sightline import Session
 from sightline.backends.window_win import WindowBackend
 
