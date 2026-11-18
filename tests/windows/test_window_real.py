@@ -497,7 +497,9 @@ def test_hidden_app_without_exe(notepads, tmp_path, monkeypatch, kind):
     s.type(f"started from {kind}", into=At(area))
     time.sleep(0.5)
     assert b.run(_text, edit) == f"started from {kind}"
-    assert _user_state() == before
+    now = _user_state()
+    thief = [w for w in list_windows() if w["hwnd"] == now[0]]
+    assert now == before, f"user state changed, foreground is now {thief}"
     s.close()
     time.sleep(2)
     alive = subprocess.run(["tasklist", "/FI", f"PID eq {app_pid}"], capture_output=True, text=True).stdout

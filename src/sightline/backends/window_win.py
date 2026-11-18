@@ -879,6 +879,8 @@ def shell_command(launch):
         return launch, 0                      # "prog.exe arg" or a name found on PATH
     if not ext or ext in DIRECT:
         return launch, 0
+    if ext in (".bat", ".cmd"):                          # in a console nobody sees
+        return ["cmd.exe", "/d", "/c", *parts], 0x08000000
     if ext == ".ps1":
         return ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", *parts], 0x08000000
     return ["cmd.exe", "/d", "/c", "start", "", *parts], 0x08000000   # CREATE_NO_WINDOW
