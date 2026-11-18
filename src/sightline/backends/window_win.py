@@ -204,9 +204,12 @@ class WindowBackend(Backend):
     shares_user_clipboard = True             # the session saves/restores the user's clipboard
     _ladder = ("post", "send", "real")       # input modes, from least to most intrusive
 
+    _private_desktop = False                 # True: every window on the desktop is the app's
+
     @staticmethod
     def _launch(launch, cwd):
-        return subprocess.Popen(launch, cwd=cwd)
+        cmd, flags = shell_command(launch)
+        return subprocess.Popen(cmd, cwd=cwd, creationflags=flags)
 
     def __init__(self, title: str | None = None, launch: str | list[str] | None = None,
                  cwd: str | None = None, timeout: float = 30.0, regex: bool = False,
@@ -260,7 +263,8 @@ class WindowBackend(Backend):
         while True:
             wins = [w for w in list_windows(self.api)
                     if (pat is None or pat.search(w["title"])) and w["rect"].w > 0
-                    and (pat is not None or w["pid"] == pid)]
+                    and (pat is not None or w["pid"] == pid
+                         or (self._private_desktop and w["class"] != "ConsoleWindowClass"))]
             if pid is not None and any(w["pid"] == pid for w in wins):
                 # we launched it: bind to OUR process, not another window with the same title
                 wins = [w for w in wins if w["pid"] == pid]
@@ -268,8 +272,10 @@ class WindowBackend(Backend):
                 break
             if time.monotonic() > deadline:
                 what = f"matching {title!r}" if title else "of the launched process"
+                hint = (" - if a launcher/shortcut starts the app as ANOTHER process, give its "
+                        "window title=" if not title and not self._private_desktop else "")
                 raise SightlineError(f"no visible window {what} within {timeout:g}s "
-                                     "(see `sightline windows`)")
+                                     f"(see `sightline windows`){hint}")
             time.sleep(0.3)
         self.hwnd, self.pid = wins[0]["hwnd"], wins[0]["pid"]
         self.app_key = f"{_exe_name(self.pid)}|{wins[0]['class']}"
@@ -857,6 +863,25 @@ class WindowBackend(Backend):
             self._restored_by_us = False
         if self.api.u.IsWindow(self.hwnd):
             self._restore_opacity()                              # minimized first: no flash
+
+
+DIRECT = (".exe", ".com")
+
+
+def shell_command(launch):
+    """(command, creation flags). Programs start directly; anything else Windows can open by
+    double-click (.lnk shortcut, .bat/.cmd, .jar, .py, .appref-ms, .msc, a document...) goes
+    through the shell file associations ('start'), from a console-less cmd.exe."""
+    parts = [launch] if isinstance(launch, str) else list(launch)
+    target = parts[0].strip().strip('"')
+    ext = os.path.splitext(target)[1].lower()
+    if isinstance(launch, str) and not os.path.isfile(target):
+        return launch, 0                      # "prog.exe arg" or a name found on PATH
+    if not ext or ext in DIRECT:
+        return launch, 0
+    if ext == ".ps1":
+        return ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", *parts], 0x08000000
+    return ["cmd.exe", "/d", "/c", "start", "", *parts], 0x08000000   # CREATE_NO_WINDOW
 
 
 def _exe_name(pid: int) -> str:

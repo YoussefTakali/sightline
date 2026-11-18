@@ -30,7 +30,7 @@ from ctypes import wintypes
 
 from ..errors import SightlineError
 from .base import Backend
-from .window_win import WindowBackend
+from .window_win import WindowBackend, list_windows, shell_command
 
 GENERIC_ALL = 0x10000000
 _counter = itertools.count(1)
@@ -79,13 +79,13 @@ def _api():
 class DesktopProcess:
     """A process started on a given desktop (subprocess.Popen cannot choose the desktop)."""
 
-    def __init__(self, command, cwd, desktop: str):
+    def __init__(self, command, cwd, desktop: str, flags: int = 0):
         _, self._k = _api()
         cmd = command if isinstance(command, str) else subprocess.list2cmdline(command)
         si = STARTUPINFOW(cb=ctypes.sizeof(STARTUPINFOW), lpDesktop=desktop)
         pi = PROCESS_INFORMATION()
         buf = ctypes.create_unicode_buffer(cmd)
-        if not self._k.CreateProcessW(None, buf, None, None, False, 0, None, cwd,
+        if not self._k.CreateProcessW(None, buf, None, None, False, flags, None, cwd,
                                       ctypes.byref(si), ctypes.byref(pi)):
             raise SightlineError(f"could not start {cmd!r} on the hidden desktop: "
                                  f"{ctypes.FormatError(ctypes.get_last_error())}")
@@ -159,13 +159,28 @@ class _DesktopThread:
 class _OnHiddenDesktop(WindowBackend):
     """The 'window' backend, living on the hidden desktop: launches there, no real input."""
     _ladder = ("post", "send")
+    _private_desktop = True                  # any window here is the app's (launchers welcome)
 
     def __init__(self, desktop: str, **kw):
         self._desktop = desktop
         super().__init__(**kw)
 
     def _launch(self, launch, cwd):
-        return DesktopProcess(launch, cwd, f"WinSta0\\{self._desktop}")
+        # children inherit the desktop: what a shortcut/launcher/script starts lands here too
+        cmd, flags = shell_command(launch)
+        return DesktopProcess(cmd, cwd, f"WinSta0\\{self._desktop}", flags)
+
+
+def _terminate(pid: int) -> None:
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.OpenProcess.restype = wintypes.HANDLE
+    k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    k.CloseHandle.argtypes = [wintypes.HANDLE]
+    h = k.OpenProcess(0x0001, False, pid)                  # PROCESS_TERMINATE (own processes)
+    if h:
+        k.TerminateProcess(h, 1)
+        k.CloseHandle(h)
 
 
 def _delegate(name: str):
@@ -255,13 +270,19 @@ class HiddenDesktopBackend(Backend):
         self._closed = True
         try:
             self._thread.call(self._inner.close)
-            proc = self._inner.process
-            if proc is not None and not self.keep_app:
-                proc.terminate()
-                try:
-                    proc.wait(10)
-                except subprocess.TimeoutExpired:
-                    pass
+            if not self.keep_app:
+                # every app on OUR desktop: the launched one and whatever it started
+                pids = {w["pid"] for w in self._thread.call(list_windows)}
+                proc = self._inner.process
+                if proc is not None:
+                    proc.terminate()
+                for pid in pids - {os.getpid()}:
+                    _terminate(pid)
+                if proc is not None:
+                    try:
+                        proc.wait(10)
+                    except subprocess.TimeoutExpired:
+                        pass
         finally:
             self._thread.stop()
             self._u.CloseDesktop(self._hdesk)     # gone once no app uses it any more

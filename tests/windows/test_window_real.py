@@ -461,3 +461,55 @@ def test_two_hidden_copies_in_parallel(notepads, tmp_path, monkeypatch):
     assert [b.run(_text, _hidden_edit(b)[0]) for b in bs] == ["copy 0", "copy 1"]
     for b in bs:
         b.close()
+
+
+def _shortcut(tmp_path, target="notepad.exe"):
+    lnk = tmp_path / "My App.lnk"
+    exe = subprocess.run(["where", target], capture_output=True, text=True).stdout.split()[0]
+    subprocess.run(["powershell", "-NoProfile", "-Command",
+                    f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}');"
+                    f"$s.TargetPath='{exe}';$s.Save()"], check=True)
+    return str(lnk)
+
+
+@pytest.mark.parametrize("kind", ["shortcut", "launcher_bat"])
+def test_hidden_app_without_exe(notepads, tmp_path, monkeypatch, kind):
+    """No .exe to give: a shortcut, or a .bat launcher that starts the app as ANOTHER process
+    and exits. No title needed: any window on the private desktop is the app's. Closing the
+    session closes the app the launcher started."""
+    from sightline import At, Session
+    from sightline.backends.hidden_win import HiddenDesktopBackend
+    from sightline.backends.window_win import list_windows
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    if kind == "shortcut":
+        launch = _shortcut(tmp_path)
+    else:
+        bat = tmp_path / "start app.bat"
+        bat.write_text('@echo off\r\nstart "" notepad.exe\r\n')
+        launch = str(bat)
+    before = _user_state()
+    b = HiddenDesktopBackend(launch=launch, timeout=30)
+    app_pid = b.pid
+    notepads.append(type("P", (), {"pid": app_pid})())
+    assert app_pid not in [w["pid"] for w in list_windows()]
+    s = Session(b, timeout=5, trace="off")
+    edit, area = _hidden_edit(b)
+    s.type(f"started from {kind}", into=At(area))
+    time.sleep(0.5)
+    assert b.run(_text, edit) == f"started from {kind}"
+    assert _user_state() == before
+    s.close()
+    time.sleep(2)
+    alive = subprocess.run(["tasklist", "/FI", f"PID eq {app_pid}"], capture_output=True, text=True).stdout
+    assert str(app_pid) not in alive, "the app started by the launcher must be closed too"
+
+
+def test_window_backend_launches_a_shortcut(notepads, tmp_path, monkeypatch):
+    from sightline import Session
+    from sightline.backends.window_win import WindowBackend
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    b = WindowBackend(launch=_shortcut(tmp_path), title="Notepad", timeout=30)
+    notepads.append(type("P", (), {"pid": b.pid})())
+    s = Session(b, timeout=5, trace="off")
+    assert s.capture().pixels.std() > 5
+    s.close()

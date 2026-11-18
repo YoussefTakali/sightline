@@ -167,11 +167,11 @@ def cmd_inspect(args):
 def cmd_windows(args):
     if sys.platform != "win32":
         raise SightlineError("`windows` lists Windows windows; on Linux use the 'display' backend")
-    from .backends.window_win import list_windows
+    from .backends.window_win import _exe_name, list_windows
     for w in list_windows():
         if w["title"]:
-            print(f"pid {w['pid']:>6}  {str(w['rect']):>22}  {'(min) ' if w['minimized'] else ''}"
-                  f"{w['class'][:24]:<24}  {w['title']}")
+            print(f"pid {w['pid']:>6}  {_exe_name(w['pid'])[:18]:<18}  {str(w['rect']):>22}  "
+                  f"{'(min) ' if w['minimized'] else ''}{w['class'][:24]:<24}  {w['title']}")
 
 
 def cmd_doctor(args):
