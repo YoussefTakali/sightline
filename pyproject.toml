@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sightline"
+version = "0.1.0"
+description = "Visual GUI automation framework: image/OCR locators, headed and headless (VNC) targets"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "opencv-python-headless>=4.8",
+    "tomli>=2; python_version < '3.11'",       # sightline.toml on Python 3.10
+]
+
+[project.optional-dependencies]
+local = ["mss>=9", "pynput>=1.7"]          # drive the machine the code runs on
+vnc = []                                   # pure Python (pycryptodome used if present)
+ocr = ["pytesseract>=0.3.10"]              # needs the tesseract binary
+ocr-pip = ["rapidocr-onnxruntime>=1.3"]    # OCR with pip only (no system program, no admin)
+oculix = ["py4j>=0.10.9"]                  # OculiX / SikuliX jar backend
+browser = ["playwright>=1.40"]             # remote sessions in a headless browser (no admin)
+robot = ["robotframework>=6"]
+flows = ["pyyaml>=6"]                      # YAML flows
+run = ["pytest>=8", "pyyaml>=6"]           # sightline run (test runner)
+all = ["sightline[local,vnc,ocr,oculix,robot,browser,run]"]
+dev = ["sightline[vnc,ocr,oculix,robot,browser,run]"]
+
+[project.scripts]
+sightline = "sightline.cli:main"
+
+[project.entry-points.pytest11]
+sightline = "sightline.pytest_plugin"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["e2e: needs a running headless target (podman/docker)"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [".wine-env", "docker"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "I", "SIM", "PIE", "RUF100"]
+ignore = ["E741", "SIM105", "SIM108", "B905", "E731"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402", "B011"]
+"tools/*" = ["E402"]
+"src/sightline/inspector.py" = ["E501"]          # the embedded HTML/JS page

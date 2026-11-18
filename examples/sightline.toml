@@ -1,0 +1,71 @@
+# Profiles = WHERE the app runs. Tests never know; pick with SIGHTLINE_PROFILE=... or
+# Session.from_profile("...") / Library  sightline.rf.SightlineLibrary  profile=...
+default_profile = "headless"
+
+[defaults]
+assets = ["assets"]              # assets/<os>/<theme>/name.png ... (see sightline.assets)
+timeout = 10
+ocr_lang = "eng"                 # e.g. "fra+eng" (needs fra.traineddata)
+trace = "actions"                # off | failures | actions
+park_mouse = [1275, 795]         # an EMPTY spot: no hover effect pollutes the captures
+
+# Headless Linux: the docker/linux-target container (Xvfb + x11vnc)
+[profiles.headless]
+backend = "vnc"
+[profiles.headless.connection]
+host = "127.0.0.1"
+port = 5900
+port_env = "SIGHTLINE_VNC_PORT"              # optional override
+password_env = "SIGHTLINE_VNC_PASSWORD"
+target_os = "linux"
+
+# Headed: this machine (Windows / macOS / Linux X11)
+[profiles.dev]
+backend = "local"
+park_mouse = [5, 400]
+
+# Headless Windows: a VM / server session with TightVNC or UltraVNC (docs/windows-headless.md)
+[profiles.windows-vm]
+backend = "vnc"
+park_mouse = [5, 400]
+[profiles.windows-vm.connection]
+host = "10.0.0.50"
+port = 5900
+password_env = "SIGHTLINE_VNC_PASSWORD"
+target_os = "windows"
+
+# The OculiX jar drives the screen (capture + input); matching/OCR stay in sightline
+[profiles.oculix]
+backend = "oculix"
+[profiles.oculix.connection]
+jar_path = "C:/tools/oculixapi-3.0.3-windows.jar"
+target_os = "windows"
+
+# Citrix (or Horizon / AVD) through its WEB client in a HEADLESS browser: no window, your
+# PC stays usable, no admin rights. One-time login: sightline browser-login (docs/citrix-headless.md)
+[profiles.citrix-web]
+backend = "browser"
+park_mouse = [5, 5]
+[profiles.citrix-web.connection]
+url = "https://citrix.company.com/Citrix/StoreWeb/"
+channel = "msedge"
+user_data_dir = "~/.sightline/citrix"
+viewport = [1920, 1080]
+clipboard = "navigator"
+target_os = "windows"
+
+# ---- HEADLESS LOCAL: apps installed on this computer, the user keeps working ----------
+# Windows: the app's windows are captured and driven in the BACKGROUND (behind other
+# windows or off-screen, not minimized). Check an app first: sightline doctor --window "..."
+[profiles.local-windows]
+backend = "window"
+[profiles.local-windows.connection]
+title = "Gestion des commandes"            # part of the window title
+# launch = 'C:\Program Files\App\app.exe'  # optional: start it too
+
+# Linux: the app runs on a private invisible display (Xvfb, as your user): fully headless
+[profiles.local-linux]
+backend = "display"
+[profiles.local-linux.connection]
+command = ["/opt/app/bin/app"]
+size = [1280, 800]

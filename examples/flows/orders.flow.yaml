@@ -1,0 +1,32 @@
+# Run against the demo target:  sightline run examples/flows --config examples/sightline.toml --profile headless
+name: Orders
+vars: {user: Jean}
+recover:                                   # after a failed test: close whatever is open
+  - press: esc
+tests:
+  log in (if needed):
+    - if_visible: text:Connexion
+      timeout: 5
+      then:
+        - type: ${user}
+          into: "text:Utilisateur : @right:200"
+        - type: ${env:DEMO_PASSWORD}
+          into: "text:Mot de passe : @right:200"
+          secret: true
+        - click: text:Valider
+          expect: text:Bienvenue
+    - assert_visible: text:Bienvenue ${user}
+
+  read the whole grid:
+    - scroll_until_visible: exact:CMD-0001
+      area: "text:Numéro @below:300"
+      direction: up
+    - read_table: exact:CMD-0001[1]
+      columns: [Numéro, Client, Montant, Statut]
+      must_contain: [CMD-0001]
+      save_as: orders
+      csv: results/orders.csv
+
+  export, whatever dialogs appear:
+    - click: exact:Exporter
+    - handle_dialogs: {required: [exact:OK], optional: [exact:Oui], quiet: 1}

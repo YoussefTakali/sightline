@@ -1,0 +1,11 @@
+*.egg-info/
+examples/flows/results/
+out/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+sightline-find.png
+sightline-results/
+sightline-traces/
+.venv/
+.wine-env/
