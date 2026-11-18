@@ -195,6 +195,15 @@ def search_text(words: list[Word], query: str | re.Pattern, exact: bool = False,
     return sorted(hits, key=lambda h: -h.score)
 
 
+def _cpus(cap: int) -> int:
+    """CPUs this process may actually use (container/affinity limits included), capped."""
+    try:
+        n = len(os.sched_getaffinity(0))
+    except AttributeError:                                   # Windows, macOS
+        n = os.cpu_count() or 2
+    return max(1, min(cap, n))
+
+
 def _overlaps(a: Rect, b: Rect, frac: float = 0.3) -> bool:
     inter = a.intersect(b)
     return inter is not None and inter.area >= frac * min(a.area, b.area)
@@ -213,6 +222,11 @@ class TesseractOcr:
                                  "tesseract program") from exc
         if tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+        # Tesseract builds with OpenMP (Debian/Ubuntu, common Windows builds) start busy-
+        # waiting threads in EVERY process: with several bands read in parallel on a small
+        # machine they starve each other - measured 425 s instead of 1.6 s for one screen on
+        # 4 cores. One thread per process is what Tesseract recommends for parallel use.
+        os.environ.setdefault("OMP_THREAD_LIMIT", "1")
         self._pt = pytesseract
         self.lang, self.upscale, self.min_conf = lang, upscale, min_conf
         try:
@@ -243,7 +257,7 @@ class TesseractOcr:
         jobs = [(0, bgr)] + [(y, bgr[y:min(y + band + overlap, h)])
                              for y in range(0, max(h - overlap, 1), band)]
         from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=min(6, (os.cpu_count() or 2))) as pool:
+        with ThreadPoolExecutor(max_workers=_cpus(6)) as pool:
             results = list(pool.map(lambda job: (job[0], self._words(job[1])), jobs))
         # the full-screen reading is the base; bands only FILL GAPS where it saw nothing
         # (replacing words would trade a clean "Mot de passe :" for a band's ":|****")

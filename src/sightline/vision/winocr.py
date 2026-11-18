@@ -67,7 +67,7 @@ while ($true) {
     }
     $stream.Dispose()
     [Console]::Out.WriteLine((ConvertTo-Json -InputObject @($words) -Compress -Depth 3))
-  } catch { [Console]::Out.WriteLine((ConvertTo-Json -InputObject @{ error = $_.Exception.Message } -Compress)) }
+  } catch { [Console]::Out.WriteLine((ConvertTo-Json -InputObject @{ error = $_.Exception.GetBaseException().Message } -Compress)) }
   [Console]::Out.Flush()
 }
 """
@@ -122,11 +122,19 @@ class WindowsOcr:
         f = self.upscale
         img = cv2.resize(bgr, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC) if f != 1 else bgr
         with self._lock:
-            path = os.path.join(self._dir, "frame.png")
-            cv2.imwrite(path, img)
+            # a NEW file per request: Windows locks open files, and the imaging layer may
+            # still hold the previous one when the next image would overwrite it
+            self._n = getattr(self, "_n", 0) + 1
+            path = os.path.join(self._dir, f"frame-{self._n}.png")
+            if not cv2.imwrite(path, img):
+                raise SightlineError(f"Windows OCR: could not write {path}")
             self._proc.stdin.write(path + "\n")
             self._proc.stdin.flush()
             out = self._read(self.timeout)
+            try:
+                os.remove(path)
+            except OSError:
+                pass                                         # still held: removed on close()
         data = json.loads(out) if out.strip() else []
         if isinstance(data, dict):
             raise SightlineError(f"Windows OCR: {data.get('error', data)}")
