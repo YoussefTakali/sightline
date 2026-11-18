@@ -34,9 +34,10 @@ def main() -> int:
     ap.add_argument("--text", default="test", help="what to type with --type-into")
     ap.add_argument("--copy-from", help="text of a grid cell to click, then Ctrl+A / Ctrl+C")
     ap.add_argument("--no-wait", action="store_true", help="skip the 5 s 'cover the window' pause")
-    ap.add_argument("--click-mode", default="post", choices=["post", "send", "real"],
-                    help="post/send: window messages, never interrupts; real: waits until you are "
-                         "idle, brings the app forward a fraction of a second, gives your window back")
+    ap.add_argument("--click-mode", default="auto", choices=["auto", "post", "send", "real"],
+                    help="auto (default): learns what the app obeys and remembers it; post/send: "
+                         "window messages, never interrupt; real: waits until you are idle, brings "
+                         "the app forward a fraction of a second, gives your window back")
     ap.add_argument("--restore", action="store_true",
                     help="if the window is minimized, restore it behind your windows without asking")
     a = ap.parse_args()
@@ -114,12 +115,14 @@ def main() -> int:
             after = s.capture()
             after.save("citrix_2_after_click.png")
             changed = before.pixels.shape != after.pixels.shape or region_changed(before, after, before.rect)
-            hint = {"post": " -> try again with --click-mode send, then --click-mode real",
-                    "send": " -> try again with --click-mode real", "real": ""}[a.click_mode]
+            used = b.input_mode
+            how = {"post": "in the background (window messages)",
+                   "send": "in the background (synchronous window messages)",
+                   "real": "with polite real input (brief flash, your window and cursor given back)"}
             verdict("click", True if changed else None,
-                    f"the app reacted (click mode '{a.click_mode}')" if changed else
-                    f"no visible change with click mode '{a.click_mode}' - check "
-                    f"citrix_2_after_click.png{hint}")
+                    f"the app reacted - clicks work {how[used]}; remembered for this app" if changed
+                    else "no visible change in any input mode - check citrix_2_after_click.png "
+                         "(maybe that click changes nothing visible)")
         except Exception as e:
             verdict("click", False, str(e).splitlines()[0])
 

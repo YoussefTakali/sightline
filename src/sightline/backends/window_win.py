@@ -22,6 +22,9 @@ Limits (measure them per app with `sightline doctor`):
 from __future__ import annotations
 
 import ctypes
+import json
+import logging
+import os
 import re
 import subprocess
 import sys
@@ -34,6 +37,8 @@ from ..errors import SightlineError
 from ..frame import Frame
 from ..geometry import Point, Rect
 from .base import Backend
+
+log = logging.getLogger(__name__)
 
 WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_LBUTTONDBLCLK = 0x200, 0x201, 0x202, 0x203
 WM_RBUTTONDOWN, WM_RBUTTONUP, WM_RBUTTONDBLCLK = 0x204, 0x205, 0x206
@@ -192,24 +197,26 @@ class WindowBackend(Backend):
                  cwd: str | None = None, timeout: float = 30.0, regex: bool = False,
                  modifier_hold: float = 0.15, target_os: str = "windows",
                  restore_minimized: bool = False, reminimize: bool = True,
-                 input_mode: str = "post", idle_ms: int = 800):
+                 input_mode: str = "auto", idle_ms: int = 800):
         """restore_minimized=True: if the app is minimized, restore it BEHIND all other windows
         without giving it focus (a minimized window draws nothing - with Citrix seamless the
         server even stops sending it - so it must be restored to be seen; you keep working).
         reminimize=True: when the session closes, minimize it again (without activating it)
         if sightline was the one that restored it - your taskbar looks as before the run."""
         super().__init__(target_os)
-        if input_mode not in ("post", "send", "real"):
-            raise SightlineError("input_mode must be 'post', 'send' or 'real'")
+        if input_mode not in ("auto", "post", "send", "real"):
+            raise SightlineError("input_mode must be 'auto', 'post', 'send' or 'real'")
         # post: queued window messages (never interrupts; some apps ignore them)
         # send: synchronous messages + the activation messages real input generates
         # real: polite REAL input - waits for the user to be idle, brings the app forward for
         #       a fraction of a second, clicks/types, gives the user back window and cursor
-        self.input_mode = input_mode
+        # auto: learns which one THIS app obeys (see _auto) and remembers it per app
+        self.requested_mode = input_mode
+        self.idle_ms = idle_ms
+        self._real_engine = None
         self._real = None
-        if input_mode == "real":
-            from ._wininput import RealInput
-            self._real = RealInput(idle_ms=idle_ms)
+        self._confirmed = input_mode != "auto"
+        self._use_mode("post" if input_mode == "auto" else input_mode)
         self.restore_minimized = restore_minimized
         self.reminimize = reminimize
         self._restored_by_us = False
@@ -244,6 +251,12 @@ class WindowBackend(Backend):
                                      "(see `sightline windows`)")
             time.sleep(0.3)
         self.hwnd, self.pid = wins[0]["hwnd"], wins[0]["pid"]
+        self.app_key = f"{_exe_name(self.pid)}|{wins[0]['class']}"
+        if self.requested_mode == "auto":
+            learned = _load_modes().get(self.app_key)
+            if learned in ("post", "send", "real"):
+                self._use_mode(learned)
+                self._confirmed = True                    # known: never escalate (no double clicks)
         if self.api.dpi_ctx:            # speak the app's own coordinate space (DPI-unaware apps)
             ctx = self.api.u.GetWindowDpiAwarenessContext(self.hwnd)
             if ctx:
@@ -422,6 +435,69 @@ class WindowBackend(Backend):
             raise SightlineError(f"could not post message 0x{msg:x} to the application "
                                  f"(error {ctypes.get_last_error()})")
 
+    # ================================================================== input mode learning
+    def _use_mode(self, mode: str) -> None:
+        self.input_mode = mode
+        if mode == "real" and self._real_engine is None:
+            from ._wininput import RealInput
+            self._real_engine = RealInput(idle_ms=self.idle_ms)
+        self._real = self._real_engine if mode == "real" else None
+
+    def _auto(self, action, what: str) -> None:
+        """Do `action` with the current mode; if the app shows NO reaction, redo it with the
+        next mode (post -> send -> real). The first mode the app obeys is kept for this app
+        and saved, so next runs start with it and never escalate again (no double clicks)."""
+        ladder = ["post", "send", "real"]
+        start = ladder.index(self.input_mode)
+        for mode in ladder[start:]:
+            self._use_mode(mode)
+            before, noise = self._quiet_reference()
+            action()
+            if self._reacted(before, noise):
+                self._confirmed = True
+                _save_mode(self.app_key, mode)
+                log.info("input mode for %s: %s (learned on %s)", self.app_key, mode, what)
+                return
+            log.info("%s: no reaction to %s with input mode %s", self.app_key, what, mode)
+        self._use_mode(ladder[start])                    # nothing reacted: maybe a no-op action
+        log.warning("%s: no visible reaction to %s in any input mode", self.app_key, what)
+
+    def _quiet_reference(self):
+        """A capture of the app plus the pixels that change ON THEIR OWN (blinking caret,
+        animations), so they are not taken for a reaction."""
+        import cv2
+        a = self.capture()
+        time.sleep(0.6)
+        b = self.capture()
+        if a.pixels.shape != b.pixels.shape:
+            return b, None
+        noise = (cv2.absdiff(a.gray, b.gray) > 24).astype(np.uint8)
+        return b, cv2.dilate(noise, np.ones((7, 7), np.uint8))
+
+    def _reacted(self, before, noise, timeout: float = 2.0) -> bool:
+        import cv2
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            time.sleep(0.25)
+            now = self.capture()
+            if (now.pixels.shape != before.pixels.shape
+                    or (now.origin_x, now.origin_y) != (before.origin_x, before.origin_y)):
+                return True                                  # a dialog/menu opened, the app moved
+            diff = (cv2.absdiff(now.gray, before.gray) > 24).astype(np.uint8)
+            if noise is not None:
+                diff[noise > 0] = 0
+            if int(diff.sum()) > 20:
+                return True
+        return False
+
+    def forget_input_mode(self) -> None:
+        """Forget what was learned for this app (it will be learned again)."""
+        modes = _load_modes()
+        modes.pop(self.app_key, None)
+        _write_modes(modes)
+        self._confirmed = self.requested_mode != "auto"
+        self._use_mode("post")
+
     def _top_at(self, x: int, y: int):
         """The app's top-level window under screen (x, y) (a dialog or the main window)."""
         for w in self._app_windows():
@@ -485,6 +561,13 @@ class WindowBackend(Backend):
 
     def click(self, x: int, y: int, button: str = "left", count: int = 1,
               interval: float = 0.08, hold: float = 0.03) -> None:
+        if not self._confirmed:
+            return self._auto(lambda: self._click_once(x, y, button, count, interval, hold),
+                              f"click at ({x},{y})")
+        self._click_once(x, y, button, count, interval, hold)
+
+    def _click_once(self, x: int, y: int, button: str = "left", count: int = 1,
+                    interval: float = 0.08, hold: float = 0.03) -> None:
         if self._real is not None:
             with self._real.burst(self._top_at(x, y)):
                 self._real.click(x, y, button, count)
@@ -650,6 +733,11 @@ class WindowBackend(Backend):
         return (self.api.u.GetAncestor(h, 2) or h) if h else self.hwnd   # GA_ROOT
 
     def type_text(self, text: str, interval: float = 0.0) -> None:
+        if not self._confirmed and text.strip():
+            return self._auto(lambda: self._type_once(text, interval), f"typing {len(text)} chars")
+        self._type_once(text, interval)
+
+    def _type_once(self, text: str, interval: float = 0.0) -> None:
         if self._real is not None:
             with self._real.burst(self._focus_top()):
                 self._real.text(text, interval)
@@ -690,6 +778,53 @@ class WindowBackend(Backend):
             if not u.IsIconic(self.hwnd):                        # placement refused: still minimize
                 u.ShowWindow(self.hwnd, 7)
             self._restored_by_us = False
+
+
+def _exe_name(pid: int) -> str:
+    """Executable name of a process (e.g. 'wfica32.exe'); no admin rights needed."""
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.OpenProcess.restype = wintypes.HANDLE
+    k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.c_wchar_p,
+                                             ctypes.POINTER(wintypes.DWORD)]
+    k.CloseHandle.argtypes = [wintypes.HANDLE]
+    h = k.OpenProcess(0x1000, False, pid)                     # QUERY_LIMITED_INFORMATION
+    if not h:
+        return "unknown.exe"
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        n = wintypes.DWORD(1024)
+        if k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+            return os.path.basename(buf.value).lower()
+        return "unknown.exe"
+    finally:
+        k.CloseHandle(h)
+
+
+def _modes_file() -> str:
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    return os.path.join(base, "sightline", "input_modes.json")
+
+
+def _load_modes() -> dict:
+    try:
+        with open(_modes_file(), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_modes(modes: dict) -> None:
+    path = _modes_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(modes, f, indent=2, sort_keys=True)
+
+
+def _save_mode(key: str, mode: str) -> None:
+    modes = _load_modes()
+    modes[key] = mode
+    _write_modes(modes)
 
 
 def _utf16_units(ch: str) -> list[int]:

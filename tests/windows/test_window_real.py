@@ -250,3 +250,64 @@ def test_input_modes_for_apps_that_ignore_posted_messages(notepads, mode):
     u.GetCursorPos(ctypes.byref(p))
     assert (p.x, p.y) == (30, 30), "the user's cursor was not put back"
     s.close()
+
+
+def test_auto_learns_real_input_for_an_app_that_ignores_messages(notepads, tmp_path, monkeypatch):
+    """Like a Citrix seamless window: the app reacts only to raw hardware input. 'auto' must
+    try post, then send, then learn 'real' - with exactly ONE effective click - remember it,
+    give the user's window back, and start with 'real' next time."""
+    import os
+    import sys
+
+    from sightline import Session
+    from sightline.backends.window_win import WindowBackend, list_windows
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))         # isolated memory of learned modes
+    u = ctypes.windll.user32
+    app = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), "raw_input_app.py")])
+    notepads.append(app)
+    user = subprocess.Popen(["notepad.exe"])
+    notepads.append(user)
+    time.sleep(3)
+    user_hwnd = [w for w in list_windows() if w["pid"] == user.pid][0]["hwnd"]
+    u.SetForegroundWindow(user_hwnd)
+    time.sleep(0.5)
+
+    b = WindowBackend(title="RawOnly Test", timeout=20, idle_ms=0)
+    assert b.input_mode == "post"
+    s = Session(b, timeout=5, trace="off")
+    f = s.capture()
+    s.click((f.origin_x + f.width // 2, f.origin_y + f.height // 2))
+    time.sleep(1)
+    title = [w for w in list_windows() if w["pid"] == app.pid][0]["title"]
+    assert b.input_mode == "real", b.input_mode
+    assert title.endswith("clicks 1"), f"expected exactly one effective click: {title!r}"
+    assert u.GetForegroundWindow() == user_hwnd, "the user's window was not given back"
+    s.close()
+
+    b2 = WindowBackend(title="RawOnly Test", timeout=20, idle_ms=0)        # a later run
+    assert b2.input_mode == "real" and b2._confirmed, "the learned mode was not remembered"
+    s2 = Session(b2, timeout=5, trace="off")
+    f = s2.capture()
+    s2.click((f.origin_x + f.width // 2, f.origin_y + f.height // 2))
+    time.sleep(1)
+    assert [w for w in list_windows() if w["pid"] == app.pid][0]["title"].endswith("clicks 2")
+    s2.close()
+
+
+def test_auto_keeps_background_messages_for_an_app_that_obeys_them(notepads, tmp_path, monkeypatch):
+    from ctypes import wintypes
+
+    from sightline import At, Rect, Session
+    from sightline.backends.window_win import WindowBackend
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    b = WindowBackend(launch="notepad.exe", title="Notepad", timeout=20, idle_ms=0)
+    notepads.append(b.process)
+    edit = _find_text_control(b.hwnd)
+    r = wintypes.RECT()
+    ctypes.windll.user32.GetWindowRect(edit, ctypes.byref(r))
+    s = Session(b, timeout=5, trace="off")
+    s.type("auto mode", into=At(Rect.from_corners(r.left, r.top, r.right, r.bottom)))
+    time.sleep(0.5)
+    assert _text(edit).replace("\r", "") == "auto mode"
+    assert b.input_mode == "post", "a normal app must stay in the never-interrupting mode"
+    s.close()
