@@ -142,3 +142,128 @@ def citrix_launch(ica: str, windowed: bool = True, size: tuple[int, int] | None 
         except OSError:
             pass
     return [exe, prepared]
+
+
+# ====================================================================== web portal -> .ica
+_DETECT_BUTTONS = ("Already installed", "Déjà installé", "Use full version", "Utiliser la version complète")
+_OPEN_BUTTONS = ("Open", "Ouvrir", "Launch", "Lancer", "Démarrer")
+_APP_TABS = ("Apps", "APPS", "Applications", "APPLICATIONS", "All Apps", "Toutes les applications")
+
+
+def fetch_ica(portal: str, app: str, user_data_dir: str, out_dir: str | None = None,
+              channel: str | None = None, executable: str | None = None, headless: bool = True,
+              timeout: float = 90.0, browser_args: list[str] | None = None,
+              screenshot: str | None = "citrix_portal.png") -> str:
+    """Get a fresh .ica for `app` from a Citrix web portal (StoreFront / Workspace), with a
+    headless browser of sightline's own: the file is CAUGHT, never opened - unlike a company
+    browser that opens .ica files automatically (policies target Edge/Chrome, not this one).
+
+    Login: once, in a visible window, with the same profile:
+        sightline browser-login https://citrix.company.com --user-data-dir <dir>
+    Windows single sign-on (Kerberos/NTLM): browser_args=["--auth-server-allowlist=*.company.com"].
+    On failure the page is saved to `screenshot` to see where it stopped."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise SightlineError('fetch_ica needs Playwright: pip install -e ".[browser]" then '
+                             "python -m playwright install chromium") from None
+    opts: dict = {"headless": headless, "accept_downloads": True, "args": list(browser_args or [])}
+    if channel:
+        opts["channel"] = channel
+    if executable:
+        opts["executable_path"] = executable
+    out_dir = out_dir or tempfile.mkdtemp(prefix="sightline-ica-")
+    with sync_playwright() as p:
+        try:
+            ctx = p.chromium.launch_persistent_context(os.path.expanduser(user_data_dir), **opts)
+        except Exception as e:
+            raise SightlineError(f"could not start the headless browser ({str(e).splitlines()[0]}) - "
+                                 "run: python -m playwright install chromium") from None
+        downloads: list = []
+        ctx.on("page", lambda pg: pg.on("download", lambda d: downloads.append(d)))
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        page.on("download", lambda d: downloads.append(d))
+        try:
+            page.goto(portal, wait_until="domcontentloaded")
+            _open_app(page, app, downloads, timeout)
+            dst = os.path.join(out_dir, "launch.ica")
+            downloads[0].save_as(dst)
+            return dst
+        except BaseException:
+            if screenshot:
+                try:
+                    page.screenshot(path=screenshot)
+                except Exception:
+                    pass
+            raise
+        finally:
+            ctx.close()
+
+
+def _visible(locator):
+    try:
+        n = locator.count()
+    except Exception:
+        return None
+    for i in range(min(n, 20)):
+        el = locator.nth(i)
+        try:
+            if el.is_visible():
+                return el
+        except Exception:
+            continue
+    return None
+
+
+def _click_text(page, texts, exact=True) -> bool:
+    for t in texts:
+        for frame in page.frames:
+            el = _visible(frame.get_by_role("button", name=t, exact=exact)) or \
+                 _visible(frame.get_by_role("link", name=t, exact=exact))
+            if el:
+                el.click()
+                return True
+    return False
+
+
+def _open_app(page, app: str, downloads: list, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    clicked_at, searched, tabs_tried = 0.0, False, False
+    while not downloads:
+        if time.monotonic() > deadline:
+            what = "clicked, but no .ica came" if clicked_at else f"application {app!r} not found"
+            raise SightlineError(f"Citrix portal: {what} within {timeout:g}s (see the screenshot)")
+        if _visible(page.locator("input[type=password]")):
+            raise SightlineError("the Citrix portal asks for a login: log in once with "
+                                 "`sightline browser-login <portal> --user-data-dir <same dir>`")
+        if _click_text(page, _DETECT_BUTTONS):             # client detection screen
+            page.wait_for_timeout(800)
+            continue
+        if clicked_at and _click_text(page, _OPEN_BUTTONS):  # an app details pane
+            page.wait_for_timeout(1500)
+            continue
+        if not clicked_at or time.monotonic() - clicked_at > 15:
+            tile = None
+            for frame in page.frames:
+                tile = _visible(frame.get_by_text(app, exact=True)) or \
+                       _visible(frame.get_by_text(app, exact=False))
+                if tile:
+                    break
+            if tile:
+                tile.click()
+                clicked_at = time.monotonic()
+                page.wait_for_timeout(1500)
+                continue
+            if not tabs_tried and _click_text(page, _APP_TABS, exact=False):
+                tabs_tried = True
+                page.wait_for_timeout(1500)
+                continue
+            box = _visible(page.locator("input[type=search], input[placeholder*='earch'], "
+                                        "input[placeholder*='echerch'], input[aria-label*='earch']"))
+            if box and not searched:
+                box.fill(app)
+                box.press("Enter")
+                searched = True
+                page.wait_for_timeout(1500)
+                continue
+        page.wait_for_timeout(500)

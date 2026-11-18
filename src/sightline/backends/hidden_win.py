@@ -198,18 +198,29 @@ class HiddenDesktopBackend(Backend):
     def __init__(self, launch: str | list[str] | None = None, title: str | None = None,
                  desktop: str | None = None, cwd: str | None = None, timeout: float = 30.0,
                  regex: bool = False, input_mode: str = "auto", keep_app: bool = False,
+                 citrix: dict | None = None,
                  target_os: str = "windows", **window_opts):
         """launch: the app to start on the hidden desktop (title: its window, if the process
         that owns the window is not the one launched - e.g. a launcher).
         desktop: name of the hidden desktop; reuse a name to attach to an app left running
         by an earlier session (keep_app=True), without launching it again.
-        keep_app=False: the app is closed with the session (nobody could see it otherwise)."""
+        keep_app=False: the app is closed with the session (nobody could see it otherwise).
+        citrix={"portal": url, "app": name, "user_data_dir": dir}: a Citrix app from a web
+        portal - its .ica is fetched headless (never auto-opened) and opened here."""
         super().__init__(target_os)
         if sys.platform != "win32":
             raise SightlineError("the 'hidden' backend is Windows-only (Linux: 'display' backend)")
         if input_mode == "real":
             raise SightlineError("real input only reaches the desktop on screen: on a hidden "
                                  "desktop use input_mode 'auto', 'post' or 'send'")
+        if citrix:
+            # {portal, app, user_data_dir, [windowed, size, channel, browser_args]}: a fresh
+            # .ica fetched by a headless browser, opened by the Citrix client right here
+            from ..citrix import citrix_launch, fetch_ica
+            c = dict(citrix)
+            windowed, size = c.pop("windowed", True), tuple(c.pop("size", (1920, 1080)))
+            launch = citrix_launch(fetch_ica(**c), windowed=windowed, size=size)
+            timeout = max(timeout, 180.0)                     # a Citrix logon takes a while
         if not launch and not (desktop and title):
             raise SightlineError("hidden backend needs launch= (or desktop= + title= to attach)")
         self.keep_app = keep_app

@@ -4,9 +4,11 @@ r"""Run any Windows app HEADLESS: on its own invisible desktop, like a headless 
     python examples\hidden_try.py "C:\Apps\gestion.exe" --title "Gestion" --click-text "Clients"
     python examples\hidden_try.py ica --click-text "Rechercher"      (Citrix from a web portal)
 
-Citrix (.ica downloaded from the browser): close the app first (Citrix would reuse the open
-session on your screen), run with "ica", then click the app in the Citrix web page: the fresh
-.ica is picked from Downloads and opened by the Citrix client on the hidden desktop.
+Citrix from a web portal, fully headless (works even when your browser auto-opens .ica):
+    sightline browser-login https://citrix.company.com --user-data-dir %USERPROFILE%\citrix-profile
+    python examples\hidden_try.py --portal https://citrix.company.com --app "PHILEAS" ^
+        --profile %USERPROFILE%\citrix-profile --click-text "Rechercher"
+Close the app first: Citrix would reuse the session already open on your screen.
 
 Nothing appears on your screen; keep working. The pictures show what the app looks like
 on its hidden desktop. The app is closed at the end (--keep to leave it running there).
@@ -23,7 +25,7 @@ from sightline.backends.hidden_win import HiddenDesktopBackend
 from sightline.citrix import citrix_launch, wait_for_ica
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("launch", help="the program/file to start on the hidden desktop, or 'ica' to "
+ap.add_argument("launch", nargs="?", help="the program/file to start on the hidden desktop, or 'ica' to "
                                 "take the next .ica downloaded from a Citrix web page")
 ap.add_argument("--title", help="its window title, if a launcher starts another process")
 ap.add_argument("--click-text", help="a harmless text to click (found by OCR)")
@@ -33,9 +35,24 @@ ap.add_argument("--keep", action="store_true", help="leave the app running on th
 ap.add_argument("--seamless", action="store_true",
                 help="Citrix: keep seamless windows (default: one regular session window)")
 ap.add_argument("--size", default="1920x1080", help="Citrix session size (default 1920x1080)")
+ap.add_argument("--portal", help="Citrix web portal URL: fetch the .ica headless (never auto-opened)")
+ap.add_argument("--app", help="Citrix: the application's name as shown in the portal")
+ap.add_argument("--profile", help="Citrix: browser profile folder used with `sightline browser-login`")
+ap.add_argument("--sso", help="Citrix: domain for Windows single sign-on, e.g. *.company.com")
+ap.add_argument("--headed", action="store_true", help="Citrix: show the portal browser (to debug)")
 a = ap.parse_args()
 
 launch, timeout = a.launch, 60
+if a.portal:
+    if not (a.app and a.profile):
+        ap.error("--portal needs --app and --profile")
+    from sightline.citrix import fetch_ica
+    print(f"0. Fetching a fresh .ica for {a.app!r} from {a.portal} (headless browser)")
+    a.launch = fetch_ica(a.portal, a.app, a.profile, headless=not a.headed,
+                         browser_args=[f"--auth-server-allowlist={a.sso}"] if a.sso else None)
+elif not a.launch:
+    ap.error("give the program/file to launch, 'ica', or --portal/--app/--profile")
+launch = a.launch
 if a.launch.lower() == "ica" or a.launch.lower().endswith(".ica"):
     if a.launch.lower() == "ica":
         print("0. Now click the application in the Citrix web page (waiting for the .ica in Downloads)")
