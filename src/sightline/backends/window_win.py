@@ -85,6 +85,11 @@ class _Api:
             (u, "IsWindowVisible"): (wintypes.BOOL, [HW]), (u, "IsIconic"): (wintypes.BOOL, [HW]),
             (u, "IsWindow"): (wintypes.BOOL, [HW]),
             (u, "ShowWindow"): (wintypes.BOOL, [HW, ctypes.c_int]),
+            (u, "GetWindowPlacement"): (wintypes.BOOL, [HW, P]),
+            (u, "SetWindowPlacement"): (wintypes.BOOL, [HW, P]),
+            (u, "MonitorFromWindow"): (H, [HW, wintypes.DWORD]),
+            (u, "GetMonitorInfoW"): (wintypes.BOOL, [H, P]),
+            (u, "IsZoomed"): (wintypes.BOOL, [HW]),
             (u, "SetWindowPos"): (wintypes.BOOL, [HW, HW, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                                   ctypes.c_int, wintypes.UINT]),
             (u, "GetWindowTextLengthW"): (ctypes.c_int, [HW]),
@@ -132,6 +137,17 @@ class BITMAPINFOHEADER(ctypes.Structure):
                 ("biCompression", wintypes.DWORD), ("biSizeImage", wintypes.DWORD),
                 ("biXPelsPerMeter", wintypes.LONG), ("biYPelsPerMeter", wintypes.LONG),
                 ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD)]
+
+
+class WINDOWPLACEMENT(ctypes.Structure):
+    _fields_ = [("length", wintypes.UINT), ("flags", wintypes.UINT), ("showCmd", wintypes.UINT),
+                ("ptMinPosition", wintypes.POINT), ("ptMaxPosition", wintypes.POINT),
+                ("rcNormalPosition", wintypes.RECT)]
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
 
 
 class GUITHREADINFO(ctypes.Structure):
@@ -241,9 +257,22 @@ class WindowBackend(Backend):
         """Un-minimize the app WITHOUT activating it and put it at the bottom of the window
         stack: it draws again, your current window keeps the focus and stays on top."""
         u = self.api.u
+        wp = WINDOWPLACEMENT(length=ctypes.sizeof(WINDOWPLACEMENT))
+        u.GetWindowPlacement(self.hwnd, ctypes.byref(wp))
+        self._placement = wp                                     # to put it back exactly
         self._restored_by_us = True
         u.ShowWindow(self.hwnd, 4)                               # SW_SHOWNOACTIVATE
-        u.SetWindowPos(self.hwnd, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)  # HWND_BOTTOM,
+        if wp.flags & 0x2:                                       # WPF_RESTORETOMAXIMIZED
+            # it was FULL SCREEN (maximized) before being minimized. Windows has no "maximize
+            # without activating": give it exactly the monitor's work area instead, so the
+            # app (and Citrix, which mirrors the size) lays out exactly as when maximized
+            mi = MONITORINFO(cbSize=ctypes.sizeof(MONITORINFO))
+            u.GetMonitorInfoW(u.MonitorFromWindow(self.hwnd, 2), ctypes.byref(mi))  # NEAREST
+            r = mi.rcWork
+            u.SetWindowPos(self.hwnd, 1, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                           0x0010)                               # HWND_BOTTOM, NOACTIVATE
+        else:
+            u.SetWindowPos(self.hwnd, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)  # HWND_BOTTOM,
         time.sleep(0.6)                                          # NOSIZE|NOMOVE|NOACTIVATE
 
     def _app_windows_after_restore(self) -> list[dict]:
@@ -577,7 +606,15 @@ class WindowBackend(Backend):
     def close(self) -> None:
         # never closes the user's application; puts it back the way it was found
         if self._restored_by_us and self.reminimize and self.api.u.IsWindow(self.hwnd):
-            self.api.u.ShowWindow(self.hwnd, 7)                  # SW_SHOWMINNOACTIVE
+            u = self.api.u
+            wp = getattr(self, "_placement", None)
+            if wp is not None:
+                # the EXACT original state: minimized, normal size, and "reopens maximized"
+                wp.length = ctypes.sizeof(WINDOWPLACEMENT)
+                wp.showCmd = 7                                   # SW_SHOWMINNOACTIVE
+                u.SetWindowPlacement(self.hwnd, ctypes.byref(wp))
+            if not u.IsIconic(self.hwnd):                        # placement refused: still minimize
+                u.ShowWindow(self.hwnd, 7)
             self._restored_by_us = False
 
 

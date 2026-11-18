@@ -146,3 +146,72 @@ def test_restored_app_is_minimized_again_when_the_session_closes(notepads, tmp_p
     time.sleep(1)
     assert [w for w in list_windows() if w["hwnd"] == b.hwnd][0]["minimized"]
     assert u.GetForegroundWindow() == fg
+
+
+def _maximized_notepad(notepads, restore=False):
+    from sightline.backends.window_win import WindowBackend
+    b = WindowBackend(launch="notepad.exe", title="Notepad", timeout=20, restore_minimized=restore)
+    notepads.append(b.process)
+    ctypes.windll.user32.ShowWindow(b.hwnd, 3)               # SW_MAXIMIZE: full screen
+    time.sleep(1)
+    assert ctypes.windll.user32.IsZoomed(b.hwnd)
+    return b
+
+
+def test_full_screen_app_behind_another_window(notepads, tmp_path):
+    from ctypes import wintypes
+
+    from sightline import At, Rect, Session
+    from sightline.backends.window_win import list_windows
+    u = ctypes.windll.user32
+    b = _maximized_notepad(notepads)
+    s = Session(b, timeout=5, trace_dir=str(tmp_path))
+    edit = _find_text_control(b.hwnd)
+    r = wintypes.RECT()
+    u.GetWindowRect(edit, ctypes.byref(r))
+    area = Rect.from_corners(r.left, r.top, r.right, r.bottom)
+    cover = subprocess.Popen(["notepad.exe"])                # another window on top of it
+    notepads.append(cover)
+    time.sleep(2)
+    u.SetForegroundWindow([w for w in list_windows() if w["pid"] == cover.pid][0]["hwnd"])
+    time.sleep(0.5)
+    s.type("plein écran", into=At(area))
+    s.press("ctrl+a")
+    s.type("remplacé en plein écran")
+    time.sleep(0.5)
+    assert _text(edit).replace("\r", "") == "remplacé en plein écran"
+    frame = s.capture()
+    sw, sh = u.GetSystemMetrics(0), u.GetSystemMetrics(1)
+    assert frame.width >= 0.9 * sw and frame.height >= 0.8 * sh, (frame.width, frame.height, sw, sh)
+    assert not b.fallback_capture
+    frame.save(str(tmp_path / "full_screen_covered.png"))
+
+
+def test_full_screen_app_minimized_comes_back_full_size_and_reopens_maximized(notepads):
+    from ctypes import wintypes
+
+    from sightline import Session
+    from sightline.backends.window_win import WINDOWPLACEMENT, list_windows
+    u = ctypes.windll.user32
+    b = _maximized_notepad(notepads, restore=True)
+    other = subprocess.Popen(["notepad.exe"])
+    notepads.append(other)
+    time.sleep(2)
+    u.SetForegroundWindow([w for w in list_windows() if w["pid"] == other.pid][0]["hwnd"])
+    u.ShowWindow(b.hwnd, 6)                                  # minimized while full screen
+    time.sleep(1)
+    fg = u.GetForegroundWindow()
+    s = Session(b, timeout=5, trace="off")
+    frame = s.capture()                                      # restored behind, FULL size
+    work = wintypes.RECT()
+    u.SystemParametersInfoW(0x30, 0, ctypes.byref(work), 0)  # SPI_GETWORKAREA
+    r = [w for w in list_windows() if w["hwnd"] == b.hwnd][0]["rect"]
+    assert abs(r.w - (work.right - work.left)) <= 20 and abs(r.h - (work.bottom - work.top)) <= 20, r
+    assert u.GetForegroundWindow() == fg, "the user's window lost the focus"
+    assert frame.width > 100
+    s.close()                                                # back to minimized...
+    time.sleep(1)
+    assert [w for w in list_windows() if w["hwnd"] == b.hwnd][0]["minimized"]
+    wp = WINDOWPLACEMENT(length=ctypes.sizeof(WINDOWPLACEMENT))
+    u.GetWindowPlacement(b.hwnd, ctypes.byref(wp))
+    assert wp.flags & 0x2, "it would no longer reopen maximized"   # WPF_RESTORETOMAXIMIZED
