@@ -21,10 +21,10 @@ ocr-pip = ["rapidocr-onnxruntime>=1.3"]    # OCR with pip only (no system progra
 oculix = ["py4j>=0.10.9"]                  # OculiX / SikuliX jar backend
 browser = ["playwright>=1.40"]             # remote sessions in a headless browser (no admin)
 robot = ["robotframework>=6"]
-flows = ["pyyaml>=6"]                      # YAML flows
-run = ["pytest>=8", "pyyaml>=6"]           # sightline run (test runner)
-all = ["sightline[local,vnc,ocr,oculix,robot,browser,run]"]
-dev = ["sightline[vnc,ocr,oculix,robot,browser,run]"]
+flows = ["pyyaml>=6"]                      # YAML flows (no Windows wheel yet for the newest Python)
+run = ["pytest>=8"]                        # sightline run: Python tests (+ flows if pyyaml is there)
+all = ["sightline[local,vnc,ocr,oculix,robot,browser,run,flows]"]
+dev = ["sightline[vnc,ocr,oculix,robot,browser,run,flows]"]
 
 [project.scripts]
 sightline = "sightline.cli:main"
@@ -53,3 +53,4 @@ ignore = ["E741", "SIM105", "SIM108", "B905", "E731"]
 "tools/*" = ["E402"]
 "src/sightline/inspector.py" = ["E501"]          # the embedded HTML/JS page
 "src/sightline/vision/winocr.py" = ["E501"]      # the embedded PowerShell script
+"src/sightline/__init__.py" = ["E402"]           # dependency check BEFORE the imports

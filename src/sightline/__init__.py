@@ -1,4 +1,16 @@
 """sightline - visual GUI automation: image + OCR locators, headed or headless."""
+import sys as _sys
+
+for _mod, _pkg in (("numpy", "numpy"), ("cv2", "opencv-python-headless")):
+    try:
+        __import__(_mod)
+    except ImportError as _e:                   # say WHAT is missing and HOW to fix it
+        raise ImportError(
+            f"sightline needs '{_pkg}', which is not installed for this Python "
+            f"({_sys.executable}, {_sys.version.split()[0]}): {_e}. Fix: activate the virtual "
+            f"environment, then run `pip install -e .` in the sightline folder (see "
+            f"`python tools/diagnose.py`).") from _e
+
 from .backends import Backend, create_backend
 from .dialogs import handle_dialogs
 from .errors import Ambiguous, BadAsset, NotFound, SightlineError, StillVisible, Unstable, Unsupported

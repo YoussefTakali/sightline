@@ -37,9 +37,12 @@ Extras: `local` (foreground, mss+pynput) · `ocr` (Tesseract) · `ocr-pip` (Rapi
 only) · `run` (runner + YAML flows) · `browser` (web clients, Playwright) · `robot`
 (Robot Framework keywords) · `oculix` (OculiX/SikuliX jar backend). VNC needs nothing extra.
 
-**`cannot import name 'Session' from 'sightline'`** means the unrelated PyPI package is
-installed: `pip uninstall -y sightline`, then `pip install -e ".[local,run]"` again from
-this folder, with the virtual environment activated.
+**`import sightline` fails?** Run `python tools/diagnose.py` (standard library only): it
+shows which `sightline` Python finds, what is missing, and the exact fix. Typical causes: the
+virtual environment is not activated, or the unrelated PyPI package (or a leftover folder of
+it) shadows this one - `pip uninstall -y sightline`, then `pip install -e ".[local,run]"`.
+YAML flows also need `pip install pyyaml` (no Windows build yet for the newest Python:
+use Python 3.13 for flows, or write tests in Python).
 
 ## How it fits together
 
