@@ -76,8 +76,13 @@ def main() -> int:
         if answer in ("", "y", "yes", "o", "oui"):
             b.restore_minimized = "invisible"
             b.restore_behind()
-            print("   -> invisible and drawing (you keep your screen and focus); it will be "
-                  "minimized again at the end")
+            if b._ghost_saved is not None:
+                print("   -> invisible and drawing (you keep your screen and focus); it will be "
+                      "minimized again at the end")
+                verdict("invisible", True, "the minimized app can work without being seen")
+            else:
+                verdict("invisible", False, "this window manages its own transparency: it was "
+                        "restored BEHIND your windows instead (visible behind them)")
         else:
             print("   Restore it yourself (click it in the taskbar), then run this again.")
             return 1
