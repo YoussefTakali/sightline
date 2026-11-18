@@ -10,8 +10,37 @@ those three with per-app equivalents, the best way each OS allows, with no admin
 | OS | Backend | How | Headless level |
 |---|---|---|---|
 | **Linux** | `display` | sightline starts its own invisible X display (TigerVNC Xvnc, as your user) and launches the app on it | **complete**: every app (GTK, Qt, Java, Electron, Wine...), any number in parallel |
+| **Windows** | `hidden` | starts the app on **its own invisible desktop** (created as your user) and drives it there with window messages | **complete for apps that accept window messages**: nothing on your screen, never waits for your mouse, copies in parallel |
 | **Windows** | `window` | captures the app's windows from the compositor (`PrintWindow`) and **posts** clicks/keys into the right control (window messages) | **per app**: works for most desktop apps; check each with `sightline doctor` |
 | macOS | - | not implemented yet (ScreenCaptureKit + per-process events) | use `local` (foreground) |
+
+## Windows: the `hidden` backend (headless, like a headless browser)
+
+```python
+s = Session(HiddenDesktopBackend(launch=r"C:\Apps\gestion.exe"))
+```
+```toml
+[profiles.gestion]
+backend = "hidden"
+[profiles.gestion.connection]
+launch = 'C:\Apps\gestion.exe'
+```
+
+Windows lets any user create extra desktops in their session. sightline creates one per
+session, starts the app **on it**, captures its windows there and sends it window messages.
+The user's screen, taskbar, mouse and keyboard are never involved, so nothing waits for
+the user to be idle. The app is closed with the session (`keep_app=True` leaves it running;
+`desktop="name"` + `title=` attaches to it later). Try any app:
+`python examples\hidden_try.py "C:\Apps\gestion.exe" --click-text "Clients"`.
+
+Limits: real hardware input only reaches the desktop on screen, so an app that accepts ONLY
+real input (like a Citrix seamless window) cannot be driven on a hidden desktop - see
+[citrix-headless.md](citrix-headless.md) for Citrix's own headless routes. Apps that need
+Explorer (tray icons, shell notifications) don't have one there.
+
+Validated on real Windows (CI): the app is absent from the user's desktop, captured,
+clicked, typed into (accents, Ctrl+A), the user's foreground window and cursor unchanged,
+two copies in parallel, the app closed with the session.
 
 ## Windows: the `window` backend
 
