@@ -33,6 +33,15 @@ the user to be idle. The app is closed with the session (`keep_app=True` leaves 
 `desktop="name"` + `title=` attaches to it later). Try any app:
 `python examples\hidden_try.py "C:\Apps\gestion.exe" --click-text "Clients"`.
 
+**Apps without an .exe**: `launch` takes anything you could double-click - a shortcut
+(`.lnk`), a `.bat`/`.cmd` (run without a console), a `.ps1`, a Java `.jar`, a Python
+script, a ClickOnce `.appref-ms`, a document - or a command (`["javaw", "-jar", "app.jar"]`).
+Launchers that start the real app as another process and exit are fine: everything they
+start lands on the same hidden desktop, any window there is the app's (no title needed),
+and all of it is closed with the session. With the `window` backend, give the app's
+`title=` in that case. `sightline windows` shows each window's program, to find what
+runs behind a shortcut.
+
 Limits: real hardware input only reaches the desktop on screen, so an app that accepts ONLY
 real input (like a Citrix seamless window) cannot be driven on a hidden desktop - see
 [citrix-headless.md](citrix-headless.md) for Citrix's own headless routes. Apps that need
