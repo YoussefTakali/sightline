@@ -34,7 +34,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: pip install -e ".[dev]"
-      - run: pytest tests/windows/test_window_real.py -q --basetemp=win-artifacts
+      - run: pytest tests/windows -q -s --basetemp=win-artifacts
       - if: always()
         uses: actions/upload-artifact@v4
         with: {name: windows-real, path: win-artifacts}

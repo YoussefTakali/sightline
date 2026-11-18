@@ -52,3 +52,4 @@ ignore = ["E741", "SIM105", "SIM108", "B905", "E731"]
 "tests/*" = ["E402", "B011"]
 "tools/*" = ["E402"]
 "src/sightline/inspector.py" = ["E501"]          # the embedded HTML/JS page
+"src/sightline/vision/winocr.py" = ["E501"]      # the embedded PowerShell script

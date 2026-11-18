@@ -24,7 +24,7 @@ git clone https://github.com/YoussefTakali/sightline.git
 cd sightline
 python -m venv .venv
 .venv/bin/activate                      # Windows (cmd): .venv\Scripts\activate
-pip install -e ".[local,run,ocr-pip]"   # foreground backend, runner, pip-only OCR (no admin)
+pip install -e ".[local,run]"           # foreground backend + runner (Windows has OCR built in)
 python -c "import sightline; print(sightline.__file__)"   # must point INTO this folder
 
 sightline init myproject --title "Gestion des commandes"
@@ -38,8 +38,8 @@ only) · `run` (runner + YAML flows) · `browser` (web clients, Playwright) · `
 (Robot Framework keywords) · `oculix` (OculiX/SikuliX jar backend). VNC needs nothing extra.
 
 **`cannot import name 'Session' from 'sightline'`** means the unrelated PyPI package is
-installed: `pip uninstall -y sightline`, then `pip install -e ".[local,run,ocr-pip]"` again
-from this folder, with the virtual environment activated.
+installed: `pip uninstall -y sightline`, then `pip install -e ".[local,run]"` again from
+this folder, with the virtual environment activated.
 
 ## How it fits together
 
@@ -156,8 +156,12 @@ look of a button is one more file, never a script change. Create them with
 | `oculix` | the OculiX/SikuliX jar drives the screen; vision stays here | |
 | `replay` | recorded screenshots: test locators and readers offline | |
 
-OCR: `ocr = "tesseract"` (needs the program; `ocr_lang = "fra+eng"`) or `ocr = "rapidocr"`
-(`pip install rapidocr-onnxruntime`, no admin). Default `auto` tries Tesseract, then RapidOCR.
+OCR engines (`ocr = ...` in a profile):
+- `"windows"`: **built into Windows 10/11** - nothing to install, no admin, any Python
+  version; reads the Windows profile's languages (French on a French PC).
+- `"tesseract"`: needs the Tesseract program (`ocr_lang = "fra+eng"`).
+- `"rapidocr"`: `pip install rapidocr-onnxruntime` (no admin; no wheel yet for the newest Python).
+- `"auto"` (default): Tesseract, then Windows OCR, then RapidOCR.
 
 ## CLI
 

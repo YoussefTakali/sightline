@@ -343,18 +343,29 @@ class RapidOcr:
 
 
 def make_ocr(engine: str = "tesseract", lang: str = "eng"):
-    """'tesseract' (needs the tesseract program) | 'rapidocr' (pip only) | 'auto'."""
+    """'tesseract' (the tesseract program) | 'windows' (built into Windows 10/11: nothing to
+    install) | 'rapidocr' (pip only) | 'auto': Tesseract, then Windows OCR, then RapidOCR."""
+    import sys
     engine = (engine or "auto").lower()
     if engine in ("rapidocr", "rapid"):
         return RapidOcr()
     if engine == "tesseract":
         return TesseractOcr(lang)
-    try:
-        return TesseractOcr(lang)
-    except SightlineError as first:
+    if engine in ("windows", "winocr"):
+        from .winocr import WindowsOcr
+        return WindowsOcr()
+    errors = []
+    candidates = [lambda: TesseractOcr(lang)]
+    if sys.platform == "win32":
+        from .winocr import WindowsOcr
+        candidates.append(WindowsOcr)
+    candidates.append(RapidOcr)
+    for make in candidates:
         try:
-            return RapidOcr()
-        except SightlineError:
-            raise SightlineError(
-                "No OCR engine available. Either `pip install rapidocr-onnxruntime` (pip only, "
-                f"no admin rights), or install Tesseract. Tesseract said: {first}") from None
+            return make()
+        except SightlineError as e:
+            errors.append(str(e).splitlines()[0])
+    raise SightlineError(
+        "No OCR engine available. On Windows the built-in one needs nothing installed "
+        "(ocr = \"windows\"); otherwise `pip install rapidocr-onnxruntime` (pip only, no admin) "
+        "or install Tesseract. Tried: " + " | ".join(errors))

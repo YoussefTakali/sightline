@@ -7,6 +7,7 @@ Nothing is clicked or typed unless you ask for it with an option.
   python examples\citrix_check.py --window "..." --type-into "Nom :" --text "test"
   python examples\citrix_check.py --window "..." --copy-from "a value shown in a grid"
 
+  --ocr windows     Windows' built-in OCR: nothing to install, any Python version
   --ocr rapidocr    OCR with pip only (no admin): pip install rapidocr-onnxruntime
   --ocr tesseract   if Tesseract is installed (--lang fra+eng needs fra.traineddata)
 
@@ -26,7 +27,7 @@ from sightline.frame import region_changed
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--window", required=True, help="part of the Citrix app's window title")
-    ap.add_argument("--ocr", default="auto", help="auto | rapidocr | tesseract")
+    ap.add_argument("--ocr", default="auto", help="auto | windows | rapidocr | tesseract")
     ap.add_argument("--lang", default="eng", help="Tesseract languages, e.g. fra+eng")
     ap.add_argument("--click-text", help="click this text (something harmless)")
     ap.add_argument("--type-into", help="label of a field, e.g. 'Nom :' (field right of it)")
@@ -74,7 +75,7 @@ def main() -> int:
         for t, r in phrases[:15]:
             print(f"   {str(r):>22}  {t}")
         verdict("ocr", bool(phrases), f"{len(phrases)} phrase(s) read" if phrases else
-                "nothing read (try --ocr rapidocr, or --lang fra+eng)")
+                "nothing read (try --ocr windows, or --lang fra+eng)")
     except Exception as e:
         verdict("ocr", False, f"OCR not available: {str(e).splitlines()[0]}")
 

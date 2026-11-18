@@ -91,6 +91,9 @@ class Session:
         try:
             self.backend.close()
         finally:
+            closer = getattr(self._ocr, "close", None)       # e.g. the Windows OCR helper process
+            if callable(closer):
+                closer()
             self.report = self.tracer.close()
 
     def __enter__(self):
