@@ -238,3 +238,33 @@ def test_grid_cell_cleanup_keeps_data_symbols():
     assert _clean_cell("| CMD-0001 |") == "CMD-0001"
     assert _clean_cell("-15,00") == "-15,00"
     assert _clean_cell("A / B") == "A / B"
+
+
+def test_grid_second_look_rereads_a_cell_the_column_pass_missed():
+    """The column-wide OCR pass loses one row: that cell shows ink, so it is re-read."""
+    from conftest import font, to_bgr
+    from PIL import Image as PILImage
+    from PIL import ImageDraw
+
+    from sightline import Session
+    from sightline.backends.replay import ReplayBackend
+    from sightline.components.grid import GridGeometry, _read_page
+    from sightline.vision.ocr import Word
+
+    img = PILImage.new("RGB", (300, 120), (255, 255, 255))
+    d = ImageDraw.Draw(img)
+    for i, y in enumerate((10, 40, 70)):
+        d.text((10, y), f"ROW-{i + 1}", font=font(14), fill=(0, 0, 0))
+    frame_bgr = to_bgr(img)
+
+    class LossyOcr:                             # column pass forgets the middle row
+        def words(self, bgr):
+            return [Word("ROW-1", Rect(7, 10, 60, 14), 0.9), Word("ROW-3", Rect(7, 70, 60, 14), 0.9)]
+
+        def line(self, bgr, cell=True):
+            return "ROW-2", 0.9
+
+    s = Session(ReplayBackend([frame_bgr]), trace="off", ocr=LossyOcr())
+    geo = GridGeometry(header=Rect(0, 0, 300, 5), columns=[(0, 200)], body=Rect(0, 5, 300, 110))
+    rows = _read_page(s, s.capture(), geo, 0)
+    assert [r[0] for r in rows] == ["ROW-1", "ROW-2", "ROW-3"]

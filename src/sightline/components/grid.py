@@ -30,7 +30,7 @@ import numpy as np
 from ..errors import NotFound, SightlineError
 from ..frame import Frame, region_changed
 from ..geometry import Rect
-from ..vision.ocr import fold, ink, search_text
+from ..vision.ocr import fold, ink, ink_cell, search_text
 
 if TYPE_CHECKING:
     from ..session import Session
@@ -183,6 +183,15 @@ def _read_page(s: Session, frame: Frame, geo: GridGeometry, key_idx: int):
                 if a <= cy < b:
                     cells[r][c] = (cells[r][c] + " " + w.text).strip()
                     break
+    # second look: a cell that SHOWS text but came back empty from the column-wide pass is
+    # re-read on its own (tight crop) - a whole row could otherwise vanish from the table
+    for r, (a, b) in enumerate(bands):
+        for c, (x0, x1) in enumerate(geo.columns):
+            if cells[r][c].strip():
+                continue
+            cell = frame.crop(Rect.from_corners(x0 + 3, a, x1 - 2, b))
+            if cell.pixels.size and int((ink_cell(cell.pixels) < 140).sum()) >= 8:
+                cells[r][c] = s.ocr.line(cell.pixels)[0]
     return [[_clean_cell(v) for v in row] for row in cells]
 
 
@@ -224,7 +233,15 @@ def read_grid(s: Session, columns: Sequence[str], key_column: int | str = 0,
     for _ in range(max_pages):
         pages += 1
         page = [r for r in _read_page(s, frame, geo, key_idx) if r[key_idx]]
-        new = [r for r in page if not any(_same_key(r[key_idx], o[key_idx]) for o in rows)]
+        new = []
+        for r in page:
+            known = next((o for o in rows if _same_key(r[key_idx], o[key_idx])), None)
+            if known is None:
+                new.append(r)
+            else:                                   # read twice: fill what the first read missed
+                for c, v in enumerate(r):
+                    if v and not known[c]:
+                        known[c] = v
         if pages > 1 and page and len(new) == len(page):
             raise SightlineError("grid: the scroll skipped rows (no overlap between pages) - "
                                  "use fewer scroll_clicks")

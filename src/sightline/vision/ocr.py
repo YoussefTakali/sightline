@@ -263,7 +263,12 @@ class TesseractOcr:
         # (replacing words would trade a clean "Mot de passe :" for a band's ":|****")
         out: list[Word] = list(results[0][1])
         for y, words in results[1:]:
+            y_end = min(y + band + overlap, h)
             for w in words:
+                # a word touching a band's CUT edge is a fragment of a cut line (OCR turns the
+                # bottoms of letters into an 'i'): the overlapping neighbour band has it whole
+                if (y > 0 and w.rect.y <= 2) or (y_end < h and w.rect.bottom >= y_end - y - 2):
+                    continue
                 w = Word(w.text, w.rect.offset(0, y), w.conf)
                 if not any(_overlaps(w.rect, o.rect) for o in out):
                     out.append(w)
