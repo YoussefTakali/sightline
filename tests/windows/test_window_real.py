@@ -392,3 +392,72 @@ def test_citrix_like_app_clicked_with_real_input_while_invisible(notepads, tmp_p
     s.close()
     time.sleep(1)
     assert [w for w in list_windows() if w["pid"] == app.pid][0]["minimized"]
+
+
+def _user_state():
+    from ctypes import wintypes
+    p = wintypes.POINT()
+    ctypes.windll.user32.GetCursorPos(ctypes.byref(p))
+    return ctypes.windll.user32.GetForegroundWindow(), (p.x, p.y)
+
+
+def _hidden_edit(b):
+    from ctypes import wintypes
+
+    from sightline import Rect
+    edit = b.run(_find_text_control, b.hwnd)
+    r = wintypes.RECT()
+    b.run(ctypes.windll.user32.GetWindowRect, edit, ctypes.byref(r))
+    return edit, Rect.from_corners(r.left, r.top, r.right, r.bottom)
+
+
+def test_hidden_desktop_app_is_headless(notepads, tmp_path, monkeypatch):
+    """The app runs on its own invisible desktop: not on the user's screen at all, captured,
+    clicked and typed into (Ctrl+A too), the user's window and cursor never touched."""
+    from sightline import At, Session
+    from sightline.backends.hidden_win import HiddenDesktopBackend
+    from sightline.backends.window_win import list_windows
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    user = subprocess.Popen(["notepad.exe"])
+    notepads.append(user)
+    time.sleep(2)
+    user_hwnd = [w for w in list_windows() if w["pid"] == user.pid][0]["hwnd"]
+    ctypes.windll.user32.SetForegroundWindow(user_hwnd)
+    ctypes.windll.user32.SetCursorPos(30, 30)
+    time.sleep(0.5)
+    before = _user_state()
+
+    b = HiddenDesktopBackend(launch="notepad.exe", timeout=20)
+    notepads.append(b.process)
+    assert b.pid not in [w["pid"] for w in list_windows()], "the app is visible on the user's desktop"
+    s = Session(b, timeout=5, trace_dir=str(tmp_path))
+    frame = s.capture()
+    assert frame.pixels.std() > 5, "the hidden app must still be captured"
+    edit, area = _hidden_edit(b)
+    s.type("first", into=At(area))
+    s.press("ctrl+a")
+    s.type("hidden desktop é")
+    time.sleep(0.5)
+    assert b.run(_text, edit).replace("\r", "") == "hidden desktop é"
+    assert _user_state() == before, "the user's foreground window or cursor changed"
+    assert b.input_mode in ("post", "send")
+    proc = b.process
+    s.close()
+    assert proc.wait(10) is not None, "the hidden app must be closed with the session"
+
+
+def test_two_hidden_copies_in_parallel(notepads, tmp_path, monkeypatch):
+    from sightline import At, Session
+    from sightline.backends.hidden_win import HiddenDesktopBackend
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    bs = [HiddenDesktopBackend(launch="notepad.exe", timeout=20) for _ in range(2)]
+    notepads.extend(b.process for b in bs)
+    assert bs[0].desktop_name != bs[1].desktop_name
+    for i, b in enumerate(bs):
+        s = Session(b, timeout=5, trace="off")
+        edit, area = _hidden_edit(b)
+        s.type(f"copy {i}", into=At(area))
+    time.sleep(0.5)
+    assert [b.run(_text, _hidden_edit(b)[0]) for b in bs] == ["copy 0", "copy 1"]
+    for b in bs:
+        b.close()

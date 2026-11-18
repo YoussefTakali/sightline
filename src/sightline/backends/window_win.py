@@ -202,6 +202,11 @@ class WindowBackend(Backend):
     name = "window"
     capabilities = frozenset({"mouse", "keyboard", "scroll", "clipboard"})
     shares_user_clipboard = True             # the session saves/restores the user's clipboard
+    _ladder = ("post", "send", "real")       # input modes, from least to most intrusive
+
+    @staticmethod
+    def _launch(launch, cwd):
+        return subprocess.Popen(launch, cwd=cwd)
 
     def __init__(self, title: str | None = None, launch: str | list[str] | None = None,
                  cwd: str | None = None, timeout: float = 30.0, regex: bool = False,
@@ -220,8 +225,8 @@ class WindowBackend(Backend):
         if restore_minimized not in (False, True, "behind", "invisible"):
             raise SightlineError("restore_minimized must be False, True/'behind' or 'invisible'")
         self._ghost_saved = None
-        if input_mode not in ("auto", "post", "send", "real"):
-            raise SightlineError("input_mode must be 'auto', 'post', 'send' or 'real'")
+        if input_mode != "auto" and input_mode not in self._ladder:
+            raise SightlineError(f"input_mode must be 'auto' or one of {self._ladder}")
         # post: queued window messages (never interrupts; some apps ignore them)
         # send: synchronous messages + the activation messages real input generates
         # real: polite REAL input - waits for the user to be idle, brings the app forward for
@@ -248,7 +253,7 @@ class WindowBackend(Backend):
         self._pos = (0, 0)
         self._down: tuple[int, str] | None = None        # (hwnd, button) of the pressed button
         self._last_target = None
-        self.process = subprocess.Popen(launch, cwd=cwd) if launch else None
+        self.process = self._launch(launch, cwd) if launch else None
         pid = self.process.pid if self.process else None
         pat = re.compile(title if regex else re.escape(title), re.I) if title else None
         deadline = time.monotonic() + timeout
@@ -270,7 +275,7 @@ class WindowBackend(Backend):
         self.app_key = f"{_exe_name(self.pid)}|{wins[0]['class']}"
         if self.requested_mode == "auto":
             learned = _load_modes().get(self.app_key)
-            if learned in ("post", "send", "real"):
+            if learned in self._ladder:
                 self._use_mode(learned)
                 self._confirmed = True                    # known: never escalate (no double clicks)
         if self.api.dpi_ctx:            # speak the app's own coordinate space (DPI-unaware apps)
@@ -519,7 +524,7 @@ class WindowBackend(Backend):
         """Do `action` with the current mode; if the app shows NO reaction, redo it with the
         next mode (post -> send -> real). The first mode the app obeys is kept for this app
         and saved, so next runs start with it and never escalate again (no double clicks)."""
-        ladder = ["post", "send", "real"]
+        ladder = list(self._ladder)
         start = ladder.index(self.input_mode)
         for mode in ladder[start:]:
             self._use_mode(mode)
