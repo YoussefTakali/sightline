@@ -15,8 +15,18 @@ accessibility tree: images, OCR and geometry, made reliable.
 
 ## Quick start
 
+sightline is installed **from this repository** (it is not published on PyPI - and an
+unrelated package called `sightline` exists there: `pip install sightline` would install
+that one, and then `from sightline import Session` fails).
+
 ```bash
-pip install "sightline[all]"            # or pick extras below
+git clone https://github.com/YoussefTakali/sightline.git
+cd sightline
+python -m venv .venv
+.venv/bin/activate                      # Windows (cmd): .venv\Scripts\activate
+pip install -e ".[local,run,ocr-pip]"   # foreground backend, runner, pip-only OCR (no admin)
+python -c "import sightline; print(sightline.__file__)"   # must point INTO this folder
+
 sightline init myproject --title "Gestion des commandes"
 cd myproject
 sightline inspect --profile background  # live view: try locators, crop image assets
@@ -26,6 +36,10 @@ sightline run --profile background      # run tests/ and flows/, report in sight
 Extras: `local` (foreground, mss+pynput) · `ocr` (Tesseract) · `ocr-pip` (RapidOCR, pip
 only) · `run` (runner + YAML flows) · `browser` (web clients, Playwright) · `robot`
 (Robot Framework keywords) · `oculix` (OculiX/SikuliX jar backend). VNC needs nothing extra.
+
+**`cannot import name 'Session' from 'sightline'`** means the unrelated PyPI package is
+installed: `pip uninstall -y sightline`, then `pip install -e ".[local,run,ocr-pip]"` again
+from this folder, with the virtual environment activated.
 
 ## How it fits together
 
