@@ -1,0 +1,57 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install ruff
+      - run: ruff check src tests tools examples
+
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python }}"}
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -e ".[dev]"
+      - run: pytest -m "not e2e" -q
+
+  windows-real:                 # the background 'window' backend on a real Windows desktop
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/windows/test_window_real.py -q --basetemp=win-artifacts
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: {name: windows-real, path: win-artifacts}
+
+  e2e-linux:                    # VNC, web client, Citrix-like lab, private displays, Wine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/test_e2e_headless.py tests/test_e2e_browser.py tests/test_e2e_citrix_lab.py -q
+      - name: private displays (dev container)
+        run: |
+          docker build -t sightline-dev docker/dev
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/work -w /work \
+            -e PYTHONPATH=/work/src sightline-dev python3 -m pytest -q -p no:cacheprovider tests/test_display_linux.py
+      - name: Windows backend under Wine
+        run: tools/wine_smoke.sh
