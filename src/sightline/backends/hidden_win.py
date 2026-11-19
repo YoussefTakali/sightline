@@ -30,7 +30,7 @@ from ctypes import wintypes
 
 from ..errors import SightlineError
 from .base import Backend
-from .window_win import WindowBackend, list_windows, shell_command
+from .window_win import NeedsRealInput, WindowBackend, list_windows, shell_command
 
 GENERIC_ALL = 0x10000000
 _counter = itertools.count(1)
@@ -164,6 +164,11 @@ class _OnHiddenDesktop(WindowBackend):
     def __init__(self, desktop: str, **kw):
         self._desktop = desktop
         super().__init__(**kw)
+
+    def _no_reaction(self, what: str) -> None:
+        if self.requested_mode == "auto" and not self._confirmed:
+            raise NeedsRealInput(f"{self.app_key}: no reaction to {what} on a hidden desktop")
+        super()._no_reaction(what)
 
     def _launch(self, launch, cwd):
         # children inherit the desktop: what a shortcut/launcher/script starts lands here too

@@ -215,7 +215,8 @@ class WindowBackend(Backend):
                  cwd: str | None = None, timeout: float = 30.0, regex: bool = False,
                  modifier_hold: float = 0.15, target_os: str = "windows",
                  restore_minimized: bool | str = False, reminimize: bool = True,
-                 input_mode: str = "auto", idle_ms: int = 800):
+                 input_mode: str = "auto", idle_ms: int = 800, match=None, abort_if=None,
+                 hide_launched: bool = False, close_launched: bool = False):
         """A minimized window draws nothing (with Citrix seamless the server even stops sending
         it), so to be seen it must not stay minimized:
         restore_minimized="invisible": made fully TRANSPARENT first, then restored at the
@@ -224,7 +225,11 @@ class WindowBackend(Backend):
         Real input in invisible mode puts the window on top at opacity 1/255 for the click -
         it never visibly appears. reminimize=True: at the end it is minimized again and its
         opacity put back - your taskbar looks as before the run."""
+        # match(window) -> bool: extra window filter; abort_if() -> bool: give up waiting
+        # (AppElsewhere); hide_launched: an app WE launch on the user's desktop is made
+        # invisible at once; close_launched: closed with the session
         super().__init__(target_os)
+        self.close_launched = close_launched
         if restore_minimized not in (False, True, "behind", "invisible"):
             raise SightlineError("restore_minimized must be False, True/'behind' or 'invisible'")
         self._ghost_saved = None
@@ -263,13 +268,16 @@ class WindowBackend(Backend):
         while True:
             wins = [w for w in list_windows(self.api)
                     if (pat is None or pat.search(w["title"])) and w["rect"].w > 0
-                    and (pat is not None or w["pid"] == pid
-                         or (self._private_desktop and w["class"] != "ConsoleWindowClass"))]
+                    and (match(w) if match else
+                         (pat is not None or w["pid"] == pid
+                          or (self._private_desktop and w["class"] != "ConsoleWindowClass")))]
             if pid is not None and any(w["pid"] == pid for w in wins):
                 # we launched it: bind to OUR process, not another window with the same title
                 wins = [w for w in wins if w["pid"] == pid]
             if wins:
                 break
+            if abort_if is not None and abort_if():
+                raise AppElsewhere("the app opened somewhere else")
             if time.monotonic() > deadline:
                 what = f"matching {title!r}" if title else "of the launched process"
                 hint = (" - if a launcher/shortcut starts the app as ANOTHER process, give its "
@@ -278,6 +286,12 @@ class WindowBackend(Backend):
                                      f"(see `sightline windows`){hint}")
             time.sleep(0.3)
         self.hwnd, self.pid = wins[0]["hwnd"], wins[0]["pid"]
+        self.title = wins[0]["title"]
+        if hide_launched and self.process is not None:
+            # we just started it on the user's desktop: out of sight at once, still drawing
+            self.restore_minimized = self.restore_minimized or "invisible"
+            if self._make_invisible():
+                self.api.u.SetWindowPos(self.hwnd, 1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
         self.app_key = f"{_exe_name(self.pid)}|{wins[0]['class']}"
         if self.requested_mode == "auto":
             learned = _load_modes().get(self.app_key)
@@ -549,6 +563,9 @@ class WindowBackend(Backend):
                 return
             log.info("%s: no reaction to %s with input mode %s", self.app_key, what, mode)
         self._use_mode(ladder[start])                    # nothing reacted: maybe a no-op action
+        self._no_reaction(what)
+
+    def _no_reaction(self, what: str) -> None:
         log.warning("%s: no visible reaction to %s in any input mode", self.app_key, what)
 
     def _quiet_reference(self):
@@ -867,8 +884,35 @@ class WindowBackend(Backend):
             if not u.IsIconic(self.hwnd):                        # placement refused: still minimize
                 u.ShowWindow(self.hwnd, 7)
             self._restored_by_us = False
+        if self.close_launched and self.process is not None:
+            _kill(self.pid)                                      # the app (maybe via a launcher)
+            try:
+                self.process.terminate()
+            except OSError:
+                pass
+            return
         if self.api.u.IsWindow(self.hwnd):
             self._restore_opacity()                              # minimized first: no flash
+
+
+class AppElsewhere(SightlineError):
+    """The app's window appeared somewhere else than where it was launched."""
+
+
+class NeedsRealInput(SightlineError):
+    """The app reacted to no window message: it needs real input (visible desktop)."""
+
+
+def _kill(pid: int) -> None:
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.OpenProcess.restype = wintypes.HANDLE
+    k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    k.CloseHandle.argtypes = [wintypes.HANDLE]
+    h = k.OpenProcess(0x0001, False, pid)
+    if h:
+        k.TerminateProcess(h, 1)
+        k.CloseHandle(h)
 
 
 DIRECT = (".exe", ".com")

@@ -575,3 +575,111 @@ def test_visit_desktop_open_apps_by_hand_then_attach(tmp_path, monkeypatch):
     except SightlineError:
         left = []                              # or it is already gone
     assert left == [], f"apps left on the desktop after close: {left}"
+
+
+def _start_menu_shortcut(name, target, args=""):
+    import os
+    folder = os.path.join(os.environ["APPDATA"], "Microsoft", "Windows", "Start Menu", "Programs")
+    lnk = os.path.join(folder, f"{name}.lnk")
+    subprocess.run(["powershell", "-NoProfile", "-Command",
+                    f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}');"
+                    f"$s.TargetPath='{target}';$s.Arguments='{args}';$s.Save()"], check=True)
+    return lnk
+
+
+def test_app_backend_by_name_runs_headless(tmp_path, monkeypatch):
+    """Only a NAME: found in the Start menu, run on a hidden desktop, typed into; the route is
+    remembered."""
+    import os
+
+    from sightline import At, Session
+    from sightline.backends.app_win import AppBackend, _load_routes
+    from sightline.backends.window_win import list_windows
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    name = f"SlTest Editor {int(time.time()) % 100000}"
+    exe = subprocess.run(["where", "notepad.exe"], capture_output=True, text=True).stdout.split()[0]
+    lnk = _start_menu_shortcut(name, exe)
+    try:
+        before = _user_state()
+        b = AppBackend(name, timeout=30, idle_ms=0)
+        assert b.route == "hidden"
+        assert b.pid not in [w["pid"] for w in list_windows()]
+        s = Session(b, timeout=5, trace="off")
+        edit, area = _hidden_edit(b._inner)
+        s.type("by name only", into=At(area))
+        time.sleep(0.5)
+        assert b._inner.run(_text, edit) == "by name only"
+        assert _user_state() == before
+        assert _load_routes()[name.casefold()] == "hidden"
+        s.close()
+    finally:
+        os.remove(lnk)
+
+
+def test_app_backend_moves_a_real_input_only_app_by_itself(notepads, tmp_path, monkeypatch):
+    """Citrix-like app (real input only): hidden desktop first; it ignores everything there, so
+    sightline relaunches it invisibly on the user's desktop and clicks it with real input -
+    exactly once, user's window given back - and remembers it for the next run."""
+    import os
+    import sys
+
+    from sightline import Session
+    from sightline.backends.app_win import AppBackend, _load_routes
+    from sightline.backends.window_win import list_windows
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    name = f"SlTest RawOnly {int(time.time()) % 100000}"
+    pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    script = os.path.join(os.path.dirname(__file__), "raw_input_app.py")
+    lnk = _start_menu_shortcut(name, pyw, f'"{script}"')
+    user = subprocess.Popen(["notepad.exe"])
+    notepads.append(user)
+    time.sleep(2)
+    user_hwnd = [w for w in list_windows() if w["pid"] == user.pid][0]["hwnd"]
+    ctypes.windll.user32.SetForegroundWindow(user_hwnd)
+    time.sleep(0.5)
+    try:
+        b = AppBackend(name, timeout=30, idle_ms=0)
+        assert b.route == "hidden"
+        s = Session(b, timeout=5, trace="off")
+        f = s.capture()
+        s.click((f.origin_x + f.width // 2, f.origin_y + f.height // 2))
+        time.sleep(1)
+        assert b.route == "window", "it must have moved the app where real input reaches it"
+        assert b.input_mode == "real"
+        app_pid = b.pid
+        title = [w for w in list_windows() if w["pid"] == app_pid][0]["title"]
+        assert title.endswith("clicks 1"), title
+        assert ctypes.windll.user32.GetForegroundWindow() == user_hwnd
+        assert _load_routes()[name.casefold()] == "window"
+        s.close()
+        time.sleep(1)
+        assert app_pid not in [w["pid"] for w in list_windows()], "the app we started is closed"
+
+        b2 = AppBackend(name, timeout=30, idle_ms=0)               # next run: straight there
+        assert b2.route == "window"
+        s2 = Session(b2, timeout=5, trace="off")
+        f = s2.capture()
+        s2.click((f.origin_x + f.width // 2, f.origin_y + f.height // 2))
+        time.sleep(1)
+        assert [w for w in list_windows() if w["pid"] == b2.pid][0]["title"].endswith("clicks 1")
+        s2.close()
+    finally:
+        os.remove(lnk)
+
+
+def test_app_backend_uses_the_window_already_open(notepads, tmp_path, monkeypatch):
+    from sightline import Session
+    from sightline.backends.app_win import AppBackend
+    from sightline.backends.window_win import list_windows
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    user = subprocess.Popen(["notepad.exe"])
+    notepads.append(user)
+    time.sleep(2)
+    count = len([w for w in list_windows() if "notepad" in w["title"].lower()])
+    b = AppBackend("Notepad", timeout=20, idle_ms=0)
+    assert b.route == "window" and b.pid == user.pid
+    s = Session(b, timeout=5, trace="off")
+    assert s.capture().pixels.std() > 5
+    s.close()
+    assert len([w for w in list_windows() if "notepad" in w["title"].lower()]) == count
+    assert user.poll() is None, "the user's own app must never be closed"

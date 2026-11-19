@@ -23,6 +23,9 @@ def create_backend(kind: str, **opts: Any) -> Backend:
     if kind == "window":
         from .window_win import WindowBackend
         return WindowBackend(**opts)
+    if kind == "app":
+        from .app_win import AppBackend
+        return AppBackend(**opts)
     if kind == "hidden":
         from .hidden_win import HiddenDesktopBackend
         return HiddenDesktopBackend(**opts)
@@ -32,7 +35,8 @@ def create_backend(kind: str, **opts: Any) -> Backend:
     if kind == "replay":
         from .replay import ReplayBackend
         return ReplayBackend(**opts)
-    raise ValueError(f"Unknown backend '{kind}' (vnc | local | window | hidden | display | browser | oculix | replay)")
+    raise ValueError(f"Unknown backend '{kind}' "
+                     "(app | vnc | local | window | hidden | display | browser | oculix | replay)")
 
 
 __all__ = ["Backend", "create_backend", "normalize_key", "parse_combo"]
