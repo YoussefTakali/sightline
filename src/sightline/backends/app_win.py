@@ -62,9 +62,17 @@ def _load_routes() -> dict:
         return {}
 
 
-def _save_route(app: str, route: str) -> None:
+def _route_of(app: str) -> tuple[str | None, str | None]:
+    """(route, exe of the app's window) learned for this app."""
+    v = _load_routes().get(app.casefold())
+    if isinstance(v, dict):
+        return v.get("route"), v.get("exe")
+    return v, None
+
+
+def _save_route(app: str, route: str, exe: str | None = None) -> None:
     routes = _load_routes()
-    routes[app.casefold()] = route
+    routes[app.casefold()] = {"route": route, "exe": exe}
     os.makedirs(os.path.dirname(_routes_file()), exist_ok=True)
     with open(_routes_file(), "w", encoding="utf-8") as f:
         json.dump(routes, f, indent=2, sort_keys=True)
@@ -95,8 +103,9 @@ class AppBackend(Backend):
         self.keep_app = keep_app
         self._inner = None
         self._pending: list[tuple] = []          # actions done on the hidden copy, unconfirmed
-        self._learned = route == "auto" and _load_routes().get(app.casefold())
-        self.route = route if route != "auto" else (self._learned or "hidden")
+        learned, self._exe = _route_of(app) if route == "auto" else (None, None)
+        self._learned = learned
+        self.route = route if route != "auto" else (learned or "hidden")
 
         self.launch = launch or find_shortcut(app)
         mine = [w for w in _user_desktop_windows()
@@ -119,7 +128,6 @@ class AppBackend(Backend):
     def _start_hidden(self) -> None:
         from .hidden_win import HiddenDesktopBackend
         before = {w["hwnd"] for w in _user_desktop_windows()}
-        self._exe_class = None
 
         def appeared_on_user_desktop() -> bool:
             return any(w["hwnd"] not in before and self.app.casefold() in w["title"].casefold()
@@ -136,19 +144,17 @@ class AppBackend(Backend):
             self.route = "window"
             return
         self.route = "hidden"
-        self._exe_class = (_exe_name(self._inner.pid),)
+        self._exe = _exe_name(self._inner.pid)
 
     def _start_window(self) -> None:
         before = {w["hwnd"] for w in _user_desktop_windows()}
-        exe_class = getattr(self, "_exe_class", None)
-        app = self.app.casefold()
+        exe = self._exe
 
-        def ours(w) -> bool:                     # a NEW window of the app (not the user's own)
-            if w["hwnd"] in before or w["class"] == "ConsoleWindowClass":
+        def ours(w) -> bool:
+            # a NEW window (never the user's own), of the app's program when known
+            if w["hwnd"] in before or w["class"] == "ConsoleWindowClass" or not w["title"]:
                 return False
-            if exe_class:
-                return _exe_name(w["pid"]) == exe_class[0]
-            return app in w["title"].casefold()
+            return _exe_name(w["pid"]) == exe if exe else True
         from ._wininput import RealInput
         real = RealInput(idle_ms=0)
         user_fg = real.u.GetForegroundWindow()
@@ -166,7 +172,8 @@ class AppBackend(Backend):
 
     def _remember(self, route: str) -> None:
         if not self._learned:
-            _save_route(self.app, route)
+            self._exe = self._exe or _exe_name(self._inner.pid)
+            _save_route(self.app, route, self._exe)
             self._learned = route
 
     def _to_window_route(self) -> None:

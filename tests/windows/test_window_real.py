@@ -610,7 +610,7 @@ def test_app_backend_by_name_runs_headless(tmp_path, monkeypatch):
         time.sleep(0.5)
         assert b._inner.run(_text, edit) == "by name only"
         assert _user_state() == before
-        assert _load_routes()[name.casefold()] == "hidden"
+        assert _load_routes()[name.casefold()]["route"] == "hidden"
         s.close()
     finally:
         os.remove(lnk)
@@ -651,7 +651,7 @@ def test_app_backend_moves_a_real_input_only_app_by_itself(notepads, tmp_path, m
         title = [w for w in list_windows() if w["pid"] == app_pid][0]["title"]
         assert title.endswith("clicks 3"), f"every click must reach the app exactly once: {title}"
         assert ctypes.windll.user32.GetForegroundWindow() == user_hwnd
-        assert _load_routes()[name.casefold()] == "window"
+        assert _load_routes()[name.casefold()]["route"] == "window"
         s.close()
         time.sleep(1)
         assert app_pid not in [w["pid"] for w in list_windows()], "the app we started is closed"
