@@ -265,11 +265,11 @@ recovery = [{press = "esc"}, {press = "esc"}]
 [profiles.local]                 # foreground, this machine
 backend = "local"
 
-[profiles.background]            # Windows: the app in the background, you keep working
-backend = "window"
+[profiles.background]            # Windows: the app runs off your screen, you keep working
+backend = "app"                  # sightline finds the best route for this app, and remembers it
 [profiles.background.connection]
-title = "{title}"
-restore_minimized = "invisible"  # app minimized? kept invisible but drawing, re-minimized after
+app = "{title}"                  # its window title or Start menu name
+# launch = 'C:\\Apps\\app.exe'     # only if no shortcut has that name (.exe .bat .jar .lnk .ica...)
 
 [profiles.private-display]       # Linux: the app on an invisible display
 backend = "display"

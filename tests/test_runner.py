@@ -74,7 +74,7 @@ def test_init_scaffold(tmp_path, capsys):
         assert (tmp_path / "proj" / f).exists()
     from sightline.config import load_profile
     name, cfg, _ = load_profile("background", str(tmp_path / "proj" / "sightline.toml"))
-    assert cfg["connection"]["title"] == "Gestion" and cfg["recovery"] == [{"press": "esc"},
+    assert cfg["backend"] == "app" and cfg["connection"]["app"] == "Gestion" and cfg["recovery"] == [{"press": "esc"},
                                                                            {"press": "esc"}]
     from sightline.flows import load_flow
     assert load_flow(tmp_path / "proj" / "flows" / "smoke.flow.yaml").tests

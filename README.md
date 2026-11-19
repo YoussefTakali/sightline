@@ -145,12 +145,43 @@ look of a button is one more file, never a script change. Create them with
 | Windows session locked (foreground mode) | fails at once with that reason, not "not found" |
 | "It failed at 3 a.m. headless" | annotated frame per step, best near-miss in blue, results page + traces |
 
+## Automating a Windows app: just name it
+
+```python
+from sightline import Session, Text
+from sightline.backends.app_win import AppBackend
+
+s = Session(AppBackend("Gestion des commandes"))     # the app's name - nothing else
+s.click(Text("Clients"))
+```
+```toml
+[profiles.gestion]
+backend = "app"
+[profiles.gestion.connection]
+app = "Gestion des commandes"
+```
+
+sightline works out the rest by itself, and remembers it per app:
+
+1. **finds** the app: its window if already open (never started twice), else a Start menu or
+   desktop shortcut with that name, else `launch=` (an .exe, .bat, .jar, .lnk, .ica...);
+2. **runs it headless**: on its own invisible desktop - nothing on your screen, never touches
+   your mouse, several apps in parallel; if a launcher hands it to your desktop, it follows;
+3. **checks the app obeys**: some apps (Citrix windows...) accept only real input; then
+   sightline relaunches it **invisibly** on your desktop, replays what was done, and clicks
+   with real input only while you are idle, giving your window and cursor back at once;
+4. **remembers** the route and how clicks must be sent: next runs go straight to it.
+
+Apps already open stay where they are (made invisible if minimized, put back at the end).
+
 ## Where the app runs: profiles
 
 `sightline.toml` holds profiles; tests never know which one runs.
 
 | Backend | Use | Docs |
 |---|---|---|
+| `app` | **any Windows app by its name: the best route is found and remembered** | above |
+| `hidden` | Windows app on its own invisible desktop (what `app` tries first) | [headless-local](docs/headless-local.md) |
 | `window` | **local app on Windows, in the background** (check it: `sightline doctor --window "App"`) | [headless-local](docs/headless-local.md) |
 | `display` | **local app on Linux, private invisible display** (TigerVNC Xvnc) | [headless-local](docs/headless-local.md) |
 | `local` | foreground, this machine (Windows, macOS, Linux X11) | |
