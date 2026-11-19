@@ -166,7 +166,11 @@ class _OnHiddenDesktop(WindowBackend):
         super().__init__(**kw)
 
     def _no_reaction(self, what: str) -> None:
-        if self.requested_mode == "auto" and not self._confirmed:
+        # one silent click proves nothing (clicking an empty field changes nothing visible);
+        # silent TYPING, or 3 silent clicks in a row, means the app ignores this desktop
+        self._silent = getattr(self, "_silent", 0) + 1
+        if self.requested_mode == "auto" and not self._confirmed and \
+                (what.startswith("typing") or self._silent >= 3):
             raise NeedsRealInput(f"{self.app_key}: no reaction to {what} on a hidden desktop")
         super()._no_reaction(what)
 

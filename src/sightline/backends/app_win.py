@@ -94,6 +94,7 @@ class AppBackend(Backend):
         self.app, self.cwd, self.timeout, self.idle_ms = app, cwd, timeout, idle_ms
         self.keep_app = keep_app
         self._inner = None
+        self._pending: list[tuple] = []          # actions done on the hidden copy, unconfirmed
         self._learned = route == "auto" and _load_routes().get(app.casefold())
         self.route = route if route != "auto" else (self._learned or "hidden")
 
@@ -148,9 +149,14 @@ class AppBackend(Backend):
             if exe_class:
                 return _exe_name(w["pid"]) == exe_class[0]
             return app in w["title"].casefold()
+        from ._wininput import RealInput
+        real = RealInput(idle_ms=0)
+        user_fg = real.u.GetForegroundWindow()
         self._inner = WindowBackend(launch=self.launch, cwd=self.cwd, timeout=self.timeout,
                                     match=ours, hide_launched=True, idle_ms=self.idle_ms,
                                     restore_minimized="invisible", close_launched=not self.keep_app)
+        if user_fg and real.u.GetForegroundWindow() != user_fg and real.u.IsWindow(user_fg):
+            real._activate(user_fg)              # the new app must not keep the user's focus
         self.route = "window"
 
     def _hide_now(self) -> None:
@@ -178,14 +184,26 @@ class AppBackend(Backend):
         self._remember("window")
         time.sleep(2.0)                          # let it draw
 
+    _ACTIONS = ("click", "type_text", "hotkey", "key_down", "key_up", "scroll", "drag",
+                "mouse_move", "mouse_down", "mouse_up")
+
     def _call(self, name: str, *args, **kwargs):
         try:
             result = getattr(self._inner, name)(*args, **kwargs)
         except NeedsRealInput:
             if self.route != "hidden":
                 raise
+            done = self._pending
+            self._pending = []
             self._to_window_route()
+            for n, a, kw in done:                # the new copy gets EVERY action, in order
+                getattr(self._inner, n)(*a, **kw)
             return getattr(self._inner, name)(*args, **kwargs)
+        if self.route == "hidden" and name in self._ACTIONS:
+            if getattr(self._inner, "_confirmed", False):
+                self._pending = []
+            else:
+                self._pending.append((name, args, kwargs))
         if self.route == "hidden" and name in ("click", "type_text") and \
                 getattr(self._inner, "_confirmed", False):
             self._remember("hidden")             # it obeyed on the hidden desktop

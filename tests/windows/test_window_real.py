@@ -642,13 +642,14 @@ def test_app_backend_moves_a_real_input_only_app_by_itself(notepads, tmp_path, m
         assert b.route == "hidden"
         s = Session(b, timeout=5, trace="off")
         f = s.capture()
-        s.click((f.origin_x + f.width // 2, f.origin_y + f.height // 2))
+        for _ in range(3):                       # 3 silent clicks: it must move the app
+            s.click((f.origin_x + f.width // 2, f.origin_y + f.height // 2))
         time.sleep(1)
         assert b.route == "window", "it must have moved the app where real input reaches it"
         assert b.input_mode == "real"
         app_pid = b.pid
         title = [w for w in list_windows() if w["pid"] == app_pid][0]["title"]
-        assert title.endswith("clicks 1"), title
+        assert title.endswith("clicks 3"), f"every click must reach the app exactly once: {title}"
         assert ctypes.windll.user32.GetForegroundWindow() == user_hwnd
         assert _load_routes()[name.casefold()] == "window"
         s.close()
