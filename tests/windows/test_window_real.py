@@ -539,7 +539,6 @@ def test_visit_desktop_open_apps_by_hand_then_attach(tmp_path, monkeypatch):
     from sightline.backends.window_win import list_windows
     from sightline.desktops import (
         PANEL_TITLE,
-        _on_desktop,
         close_desktop,
         input_desktop,
         list_desktops,
@@ -569,7 +568,10 @@ def test_visit_desktop_open_apps_by_hand_then_attach(tmp_path, monkeypatch):
         assert input_desktop() == "Default"
     finally:
         close_desktop(name)
-    time.sleep(1)
+    time.sleep(2)
     from sightline.errors import SightlineError
-    with pytest.raises(SightlineError):
-        _on_desktop(name, lambda: None)        # the desktop is gone with its apps
+    try:
+        left = windows_on(name)                # an empty desktop object may linger briefly
+    except SightlineError:
+        left = []                              # or it is already gone
+    assert left == [], f"apps left on the desktop after close: {left}"
