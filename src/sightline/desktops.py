@@ -147,3 +147,38 @@ def close_desktop(name: str) -> list[int]:
     for pid in pids - {os.getpid()}:
         _terminate(pid)
     return sorted(pids)
+
+
+def list_desktops() -> list[str]:
+    """Desktops of this window station: 'Default' (yours), sightline's, Sysinternals
+    Desktops' ('Sysinternals Desktop 1'...) - any of them can be attached to."""
+    u = _u()
+    u.GetProcessWindowStation.restype = wintypes.HANDLE
+    proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.LPWSTR, wintypes.LPARAM)
+    u.EnumDesktopsW.argtypes = [wintypes.HANDLE, proc, wintypes.LPARAM]
+    names: list[str] = []
+    cb = proc(lambda n, _: names.append(n) or True)
+    u.EnumDesktopsW(u.GetProcessWindowStation(), cb, 0)
+    return names
+
+
+def windows_on(name: str) -> list[dict]:
+    from .backends.window_win import _exe_name, list_windows
+    out: list[dict] = []
+    _on_desktop(name, lambda: out.extend(w for w in list_windows() if w["title"]))
+    for w in out:
+        w["exe"] = _exe_name(w["pid"])
+    return out
+
+
+def child_sessions_enabled() -> bool | None:
+    """Windows child sessions (a second session of YOUR account in a window - what UiPath and
+    Power Automate 'Picture-in-Picture' use): enabled on this PC? None if unknown."""
+    try:
+        w = ctypes.WinDLL("wtsapi32")
+        flag = wintypes.BOOL()
+        if w.WTSIsChildSessionsEnabled(ctypes.byref(flag)):
+            return bool(flag.value)
+    except (OSError, AttributeError):
+        pass
+    return None

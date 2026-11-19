@@ -531,33 +531,40 @@ def test_take_over_never_touches_non_citrix_apps(notepads):
 
 
 def test_visit_desktop_open_apps_by_hand_then_attach(tmp_path, monkeypatch):
-    """`sightline desktop open`: a desktop with a control panel; an app opened from the panel
-    lands on that desktop; a script attaches to it there; showing it always comes back."""
+    """`sightline desktop open`: a desktop with a control panel (not on the user's screen);
+    apps started there stay there; scripts attach by desktop name; `show` always comes back;
+    `close` closes everything."""
     from sightline import Session, Text
-    from sightline.backends.hidden_win import HiddenDesktopBackend
+    from sightline.backends.hidden_win import DesktopProcess, HiddenDesktopBackend
     from sightline.backends.window_win import list_windows
-    from sightline.desktops import PANEL_TITLE, _on_desktop, close_desktop, input_desktop, open_desktop, show
+    from sightline.desktops import (
+        PANEL_TITLE,
+        _on_desktop,
+        close_desktop,
+        input_desktop,
+        list_desktops,
+        open_desktop,
+        show,
+        windows_on,
+    )
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     name = f"sltest{int(time.time()) % 100000}"
     open_desktop(name, switch=False)
     try:
-        assert not [w for w in list_windows() if w["title"] == PANEL_TITLE + name], \
-            "the panel must not be on the user's desktop"
-        b = HiddenDesktopBackend(desktop=name, title=PANEL_TITLE + name, timeout=10)
-        s = Session(b, timeout=10, trace_dir=str(tmp_path), ocr="windows")
-        s.click(Text("Command prompt"))
-        found = []
+        assert name in list_desktops()
+        assert not [w for w in list_windows() if w["title"] == PANEL_TITLE + name]
+        # what the panel's buttons do: a program started there, through the shell
+        DesktopProcess(["cmd.exe", "/d", "/c", "start", "", "notepad.exe"], None,
+                       f"WinSta0\\{name}", 0x08000000)
         deadline = time.time() + 15
-        while not found and time.time() < deadline:
+        while not [w for w in windows_on(name) if w["exe"] == "notepad.exe"]:
+            assert time.time() < deadline, "the app started there must be on that desktop"
             time.sleep(0.5)
-            _on_desktop(name, lambda: found.extend(
-                w for w in list_windows() if f"sightline desktop {name}" in w["title"]
-                and w["title"] != PANEL_TITLE + name))
-        assert found, "the app opened from the panel must be on that desktop"
-        assert not [w for w in list_windows() if f"sightline desktop {name}" in w["title"]]
-        b.keep_app = True                      # the session must not close the panel
+        assert not [w for w in list_windows() if w["title"] == PANEL_TITLE + name]
+        b = HiddenDesktopBackend(desktop=name, title=PANEL_TITLE + name, timeout=10, keep_app=True)
+        s = Session(b, timeout=10, trace_dir=str(tmp_path), ocr="windows")
+        assert s.exists(Text("Back to my desktop"), timeout=8), "the panel must be drawn on its desktop"
         s.close()
-
         show(name, max_minutes=0.05)           # safety net: back after 3 s
         assert input_desktop() == "Default"
     finally:

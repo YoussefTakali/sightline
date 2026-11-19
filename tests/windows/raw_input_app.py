@@ -20,6 +20,7 @@ u.GetRawInputData.argtypes = [wintypes.HANDLE, wintypes.UINT, ctypes.c_void_p,
 u.BeginPaint.restype = wintypes.HDC
 u.FillRect.argtypes = [wintypes.HDC, ctypes.c_void_p, wintypes.HANDLE]
 g.CreateSolidBrush.restype = wintypes.HANDLE
+g.DeleteObject.argtypes = [wintypes.HANDLE]
 k.GetModuleHandleW.restype = wintypes.HMODULE
 
 

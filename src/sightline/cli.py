@@ -147,6 +147,17 @@ def cmd_browser_login(args):
 
 def cmd_desktop(args):
     from . import desktops
+    if args.action == "list":
+        for name in desktops.list_desktops():
+            mine = " (yours)" if name == "Default" else ""
+            print(f"{name}{mine}")
+            if name != "Default" and args.name != "-":
+                try:
+                    for w in desktops.windows_on(name):
+                        print(f"    {w['exe']:<18} {w['title']}")
+                except SightlineError:
+                    print("    (no access)")
+        return
     if args.action == "open":
         desktops.open_desktop(args.name, args.portal or "", switch=not args.no_switch,
                               max_minutes=args.max_minutes)
@@ -202,6 +213,11 @@ def cmd_doctor(args):
         print("macOS: background window automation is not implemented yet; use the 'local' "
               "backend (foreground) or a remote/web client.")
         return
+    from .desktops import child_sessions_enabled
+    cs = child_sessions_enabled()
+    print("child sessions (second session of your account, real input, never touches yours): "
+          + {True: "ENABLED - ask for the 'session' route", False: "not enabled (needs admin once)",
+             None: "unknown"}[cs])
     if not args.window:
         raise SightlineError("doctor --window \"part of the window title\"")
     from .backends.window_win import WindowBackend
@@ -374,8 +390,8 @@ def main(argv=None):
     sp.add_argument("--executable")
     sp.set_defaults(fn=cmd_browser_login)
     sp = sub.add_parser("desktop", help="visit a hidden desktop: open apps on it by hand")
-    sp.add_argument("action", choices=["open", "show", "close"])
-    sp.add_argument("name")
+    sp.add_argument("action", choices=["list", "open", "show", "close"])
+    sp.add_argument("name", nargs="?", default="")
     sp.add_argument("--portal", help="URL the panel's browser opens (e.g. the Citrix portal)")
     sp.add_argument("--no-switch", action="store_true", help="create it without showing it")
     sp.add_argument("--max-minutes", type=float, default=15, help="safety: back after N minutes")
